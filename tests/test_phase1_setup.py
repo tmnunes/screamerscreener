@@ -20,7 +20,7 @@ def test_health(client: TestClient) -> None:
     payload = response.json()
     assert payload["status"] == "ok"
     assert payload["service"] == "screamerscreener"
-    assert payload["phase"] == "1"
+    assert "version" in payload
 
 
 def test_project_layout_exists() -> None:

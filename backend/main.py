@@ -1,9 +1,10 @@
-"""FastAPI application entrypoint (Phase 1 smoke health check only)."""
+"""FastAPI application entrypoint."""
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend import __version__
+from backend.api.routes import router
 
 app = FastAPI(
     title="ScreamerScreener API",
@@ -22,12 +23,4 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-@app.get("/api/health")
-def health() -> dict[str, str]:
-    return {
-        "status": "ok",
-        "service": "screamerscreener",
-        "version": __version__,
-        "phase": "1",
-    }
+app.include_router(router)
