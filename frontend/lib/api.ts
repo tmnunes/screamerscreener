@@ -38,13 +38,14 @@ export type Trigger = {
     return_3d: number | null;
     return_5d: number | null;
     return_10d: number | null;
+    return_15d: number | null;
     return_20d: number | null;
   } | null;
   performance_meta?: {
     future_trading_days: number;
     last_market_date: string | null;
-    horizons: Record<"1d" | "3d" | "5d" | "10d" | "20d", boolean>;
-    horizon_dates?: Record<"1d" | "3d" | "5d" | "10d" | "20d", string | null>;
+    horizons: Record<"1d" | "3d" | "5d" | "10d" | "15d" | "20d", boolean>;
+    horizon_dates?: Record<"1d" | "3d" | "5d" | "10d" | "15d" | "20d", string | null>;
   };
   secondary_signals?: {
     overall: "green" | "red" | "neutral";
@@ -93,6 +94,34 @@ export const fetchStats = () =>
     today: { date: string | null; long: number; short: number; stop: number };
     last_market_date: string | null;
   }>("/api/stats");
+
+export type LongHorizonStats = {
+  min: number | null;
+  max: number | null;
+  avg: number | null;
+  count: number;
+};
+
+export type LongPerformanceStats = {
+  trigger_type: "LONG";
+  long_count: number;
+  horizons: Record<"5d" | "10d" | "15d", LongHorizonStats>;
+  by_stock?: Array<{
+    ticker: string;
+    name?: string | null;
+    long_count: number;
+    horizons: Record<"5d" | "10d" | "15d", LongHorizonStats>;
+  }>;
+  note: string;
+  ticker?: string;
+  name?: string | null;
+};
+
+export const fetchLongPerformanceStats = () =>
+  api<LongPerformanceStats>("/api/stats/long-performance");
+
+export const fetchStockLongStats = (ticker: string) =>
+  api<LongPerformanceStats>(`/api/stocks/${ticker}/long-stats`);
 
 export const fetchDataStatus = () =>
   api<{

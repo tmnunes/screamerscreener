@@ -10,6 +10,7 @@ const HORIZONS = [
   { key: "3d" as const, label: "+3D", field: "return_3d" as const, days: 3 },
   { key: "5d" as const, label: "+5D", field: "return_5d" as const, days: 5 },
   { key: "10d" as const, label: "+10D", field: "return_10d" as const, days: 10 },
+  { key: "15d" as const, label: "+15D", field: "return_15d" as const, days: 15 },
   { key: "20d" as const, label: "+20D", field: "return_20d" as const, days: 20 },
 ];
 

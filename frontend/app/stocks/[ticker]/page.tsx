@@ -2,11 +2,13 @@ import Link from "next/link";
 import { SiteHeader } from "@/components/site-header";
 import { PriceChart } from "@/components/price-chart";
 import { SecondaryIndicatorsPanel } from "@/components/secondary-indicators-panel";
+import { LongStatsPanel } from "@/components/long-stats-panel";
 import {
   fetchIndicators,
   fetchPrices,
   fetchSecondaryIndicators,
   fetchStock,
+  fetchStockLongStats,
   fetchStockTriggers,
   formatDay,
   formatPrice,
@@ -28,16 +30,19 @@ export default async function StockPage({
   let triggers: Awaited<ReturnType<typeof fetchStockTriggers>> = [];
   let secondary: Awaited<ReturnType<typeof fetchSecondaryIndicators>> | null =
     null;
+  let longStats: Awaited<ReturnType<typeof fetchStockLongStats>> | null = null;
   let error: string | null = null;
 
   try {
-    [stock, prices, indicators, triggers, secondary] = await Promise.all([
-      fetchStock(upper),
-      fetchPrices(upper),
-      fetchIndicators(upper),
-      fetchStockTriggers(upper),
-      fetchSecondaryIndicators(upper),
-    ]);
+    [stock, prices, indicators, triggers, secondary, longStats] =
+      await Promise.all([
+        fetchStock(upper),
+        fetchPrices(upper),
+        fetchIndicators(upper),
+        fetchStockTriggers(upper),
+        fetchSecondaryIndicators(upper),
+        fetchStockLongStats(upper),
+      ]);
   } catch (err) {
     error = err instanceof Error ? err.message : "Failed to load stock";
   }
@@ -91,6 +96,13 @@ export default async function StockPage({
                   trigger_type: t.trigger_type,
                   trigger_price: Number(t.trigger_price),
                 }))}
+              />
+            </section>
+
+            <section className="mb-10">
+              <LongStatsPanel
+                data={longStats}
+                title={`LONG performance · ${upper}`}
               />
             </section>
 

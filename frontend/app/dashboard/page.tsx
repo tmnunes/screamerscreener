@@ -2,8 +2,10 @@ import { SiteHeader } from "@/components/site-header";
 import { TriggerCard } from "@/components/trigger-card";
 import { RecentTimeline } from "@/components/recent-timeline";
 import { RefreshButton } from "@/components/refresh-button";
+import { LongStatsPanel } from "@/components/long-stats-panel";
 import {
   fetchDataStatus,
+  fetchLongPerformanceStats,
   fetchRecent,
   fetchStats,
   fetchToday,
@@ -16,14 +18,16 @@ export default async function DashboardPage() {
   let recent = null;
   let stats = null;
   let status = null;
+  let longStats = null;
   let error: string | null = null;
 
   try {
-    [today, recent, stats, status] = await Promise.all([
+    [today, recent, stats, status, longStats] = await Promise.all([
       fetchToday(),
       fetchRecent(30),
       fetchStats(),
       fetchDataStatus(),
+      fetchLongPerformanceStats(),
     ]);
   } catch (err) {
     error = err instanceof Error ? err.message : "Failed to load dashboard data";
@@ -76,6 +80,10 @@ export default async function DashboardPage() {
             </section>
 
             <RecentTimeline days={recent?.days ?? []} />
+
+            <section className="mt-12 border-t border-[var(--line)] pt-8">
+              <LongStatsPanel data={longStats} showByStock />
+            </section>
 
             <section className="mt-12 border-t border-[var(--line)] pt-8">
               <h2 className="mb-4 text-sm font-semibold tracking-[0.15em] text-[var(--muted)]">

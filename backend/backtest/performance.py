@@ -12,6 +12,7 @@ class PerformanceResult:
     return_3d: float | None
     return_5d: float | None
     return_10d: float | None
+    return_15d: float | None
     return_20d: float | None
     max_favorable_return: float | None
     max_adverse_return: float | None
@@ -52,6 +53,7 @@ def calculate_performance_from_closes(
         return_3d=at(3),
         return_5d=at(5),
         return_10d=at(10),
+        return_15d=at(15),
         return_20d=at(20),
         max_favorable_return=max_fav,
         max_adverse_return=max_adv,
@@ -69,7 +71,7 @@ def performance_from_price_series(
     date_to_idx = {p["date"]: i for i, p in enumerate(prices)}
     idx = date_to_idx.get(trigger_date)
     if idx is None:
-        return PerformanceResult(None, None, None, None, None, None, None)
+        return PerformanceResult(None, None, None, None, None, None, None, None)
 
     closes_after = [float(p["close"]) for p in prices[idx + 1 :]]
     return calculate_performance_from_closes(
@@ -88,6 +90,7 @@ def performance_to_row(trigger_id: str, perf: PerformanceResult) -> dict[str, An
         "return_3d": perf.return_3d,
         "return_5d": perf.return_5d,
         "return_10d": perf.return_10d,
+        "return_15d": perf.return_15d,
         "return_20d": perf.return_20d,
         "max_favorable_return": perf.max_favorable_return,
         "max_adverse_return": perf.max_adverse_return,
@@ -95,7 +98,8 @@ def performance_to_row(trigger_id: str, perf: PerformanceResult) -> dict[str, An
     }
 
 
-HORIZON_OFFSETS = (1, 3, 5, 10, 20)
+HORIZON_OFFSETS = (1, 3, 5, 10, 15, 20)
+STATS_HORIZONS = (5, 10, 15)
 
 
 def future_trading_days_available(

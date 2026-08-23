@@ -15,6 +15,7 @@ from backend.api.deps import (
     latest_market_date,
     latest_pipeline,
 )
+from backend.backtest.long_stats import summarize_long_performance
 from backend.config import get_settings
 from backend.db import get_supabase
 from backend.indicators.calculate_daily import calculate_for_all
@@ -344,6 +345,52 @@ def stats() -> dict[str, Any]:
         "last_market_date": latest_market_date().isoformat()
         if latest_market_date()
         else None,
+    }
+
+
+def _long_triggers(
+    *,
+    instrument_id: str | None = None,
+    limit: int = 5000,
+) -> list[dict[str, Any]]:
+    d_length, d_mult, d_source = default_params()
+    client = get_supabase()
+    query = (
+        client.table("triggers_daily")
+        .select("*")
+        .eq("trigger_type", "LONG")
+        .eq("length", d_length)
+        .eq("mult", d_mult)
+        .eq("source", d_source)
+        .order("date", desc=True)
+        .limit(limit)
+    )
+    if instrument_id:
+        query = query.eq("instrument_id", instrument_id)
+    return enrich_triggers(query.execute().data or [])
+
+
+@router.get("/api/stats/long-performance")
+def long_performance_stats() -> dict[str, Any]:
+    """Min / max / avg % after LONG signals at +5 / +10 / +15 trading days."""
+    rows = _long_triggers()
+    return summarize_long_performance(rows)
+
+
+@router.get("/api/stocks/{ticker}/long-stats")
+def stock_long_stats(ticker: str) -> dict[str, Any]:
+    inst = get_instrument_by_ticker(ticker)
+    if not inst:
+        raise HTTPException(status_code=404, detail="Stock not found")
+    rows = _long_triggers(instrument_id=inst["id"])
+    summary = summarize_long_performance(rows)
+    return {
+        "ticker": ticker.upper(),
+        "name": inst.get("name"),
+        "trigger_type": summary["trigger_type"],
+        "long_count": summary["long_count"],
+        "horizons": summary["horizons"],
+        "note": summary["note"],
     }
 
 
