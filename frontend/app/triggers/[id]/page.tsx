@@ -51,7 +51,7 @@ export default async function TriggerDetailPage({
                 />
               </Block>
 
-              <Block title="Vortex values">
+              <Block title="Band values">
                 <Row label="Upper" value={Number(trigger.upper).toFixed(4)} />
                 <Row label="Lower" value={Number(trigger.lower).toFixed(4)} />
                 <Row label="Basis" value={Number(trigger.basis).toFixed(4)} />

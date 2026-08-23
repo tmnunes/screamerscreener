@@ -53,7 +53,7 @@ def get_stock(ticker: str) -> dict[str, Any]:
     length, mult, source = default_params()
     return {
         **inst,
-        "vortex": {
+        "settings": {
             "length": length,
             "mult": mult,
             "source": source,
@@ -169,12 +169,15 @@ def triggers_today() -> dict[str, Any]:
 
 
 @router.get("/api/triggers/week")
-def triggers_week() -> dict[str, Any]:
+@router.get("/api/triggers/recent")
+def triggers_recent(days: int = Query(default=30, ge=1, le=90)) -> dict[str, Any]:
+    """Last N trading days with triggers, newest first."""
     market_date = latest_market_date()
     if market_date is None:
         return {"from": None, "to": None, "days": []}
 
-    start = market_date - timedelta(days=10)
+    # Calendar buffer so we still cover `days` trading sessions
+    start = market_date - timedelta(days=days * 2 + 5)
     d_length, d_mult, d_source = default_params()
     client = get_supabase()
     rows = (
@@ -190,25 +193,21 @@ def triggers_week() -> dict[str, Any]:
     ).data or []
     enriched = enrich_triggers(rows)
 
-    # Keep last 7 distinct trading dates that have any market data proximity:
-    # use trigger dates + ensure we group by date.
     by_date: dict[str, list[dict[str, Any]]] = {}
     for row in enriched:
         by_date.setdefault(row["date"], []).append(row)
 
-    # Also include empty trading days from prices for timeline richness? Spec says
-    # show triggers of last 7 market days — take last 7 dates from prices.
-    price_dates = (
+    price_rows = (
         client.table("market_prices_daily")
         .select("date")
         .lte("date", market_date.isoformat())
         .order("date", desc=True)
-        .limit(7)
+        .limit(max(days * 30, 200))
         .execute()
     ).data or []
     day_list = []
-    seen = set()
-    for item in price_dates:
+    seen: set[str] = set()
+    for item in price_rows:
         d = item["date"]
         if d in seen:
             continue
@@ -223,6 +222,8 @@ def triggers_week() -> dict[str, Any]:
                 "all": day_triggers,
             }
         )
+        if len(day_list) >= days:
+            break
 
     return {
         "from": day_list[-1]["date"] if day_list else None,

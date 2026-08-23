@@ -1,27 +1,27 @@
 import { SiteHeader } from "@/components/site-header";
 import { TriggerCard } from "@/components/trigger-card";
-import { WeekTimeline } from "@/components/week-timeline";
+import { RecentTimeline } from "@/components/recent-timeline";
 import { RefreshButton } from "@/components/refresh-button";
 import {
   fetchDataStatus,
+  fetchRecent,
   fetchStats,
   fetchToday,
-  fetchWeek,
 } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   let today = null;
-  let week = null;
+  let recent = null;
   let stats = null;
   let status = null;
   let error: string | null = null;
 
   try {
-    [today, week, stats, status] = await Promise.all([
+    [today, recent, stats, status] = await Promise.all([
       fetchToday(),
-      fetchWeek(),
+      fetchRecent(30),
       fetchStats(),
       fetchDataStatus(),
     ]);
@@ -37,7 +37,7 @@ export default async function DashboardPage() {
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              Daily Vortex Bands triggers · Length 47 · Mult 1.6 · HLC3
+              Daily triggers · Length 47 · Mult 1.6 · HLC3
             </p>
           </div>
           <RefreshButton />
@@ -75,7 +75,7 @@ export default async function DashboardPage() {
               <TriggerColumn title="STOP" color="var(--stop)" items={today?.stop ?? []} />
             </section>
 
-            <WeekTimeline days={week?.days ?? []} />
+            <RecentTimeline days={recent?.days ?? []} />
 
             <section className="mt-12 border-t border-[var(--line)] pt-8">
               <h2 className="mb-4 text-sm font-semibold tracking-[0.15em] text-[var(--muted)]">

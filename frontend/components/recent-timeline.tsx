@@ -13,7 +13,7 @@ type Day = {
   all: Trigger[];
 };
 
-export function WeekTimeline({ days }: { days: Day[] }) {
+export function RecentTimeline({ days }: { days: Day[] }) {
   const [typeFilter, setTypeFilter] = useState<"ALL" | "LONG" | "SHORT" | "STOP">(
     "ALL",
   );
@@ -38,7 +38,7 @@ export function WeekTimeline({ days }: { days: Day[] }) {
     <section>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-semibold tracking-[0.15em] text-[var(--muted)]">
-          LAST 7 DAYS
+          LAST 30 DAYS
         </h2>
         <div className="flex flex-wrap gap-2 text-xs">
           {(["ALL", "LONG", "SHORT", "STOP"] as const).map((t) => (

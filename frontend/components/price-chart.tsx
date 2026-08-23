@@ -34,7 +34,7 @@ type Trigger = {
   trigger_price: number;
 };
 
-export function VortexChart({
+export function PriceChart({
   prices,
   indicators,
   triggers,

@@ -50,7 +50,7 @@ export const fetchToday = () =>
     stop: Trigger[];
   }>("/api/triggers/today");
 
-export const fetchWeek = () =>
+export const fetchRecent = (days = 30) =>
   api<{
     from: string | null;
     to: string | null;
@@ -61,7 +61,10 @@ export const fetchWeek = () =>
       stop: Trigger[];
       all: Trigger[];
     }>;
-  }>("/api/triggers/week");
+  }>(`/api/triggers/recent?days=${days}`);
+
+/** @deprecated use fetchRecent */
+export const fetchWeek = () => fetchRecent(30);
 
 export const fetchStats = () =>
   api<{

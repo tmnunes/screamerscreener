@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { SiteHeader } from "@/components/site-header";
-import { VortexChart } from "@/components/vortex-chart";
+import { PriceChart } from "@/components/price-chart";
 import {
   fetchIndicators,
   fetchPrices,
@@ -37,7 +37,7 @@ export default async function StockPage({
     error = err instanceof Error ? err.message : "Failed to load stock";
   }
 
-  const vortex = (stock?.vortex ?? {}) as {
+  const settings = (stock?.settings ?? {}) as {
     length?: number;
     mult?: number;
     source?: string;
@@ -67,18 +67,18 @@ export default async function StockPage({
 
             <section className="mb-8 rounded border border-[var(--line)] bg-white p-4 text-sm">
               <h2 className="mb-3 text-xs font-semibold tracking-[0.15em] text-[var(--muted)]">
-                VORTEX SETTINGS
+                INDICATOR SETTINGS
               </h2>
               <div className="grid gap-2 sm:grid-cols-4">
-                <div>Length {vortex.length ?? 47}</div>
-                <div>Multiplier {vortex.mult ?? 1.6}</div>
-                <div>Source {(vortex.source ?? "hlc3").toUpperCase()}</div>
-                <div>Timeframe {vortex.timeframe ?? "Daily"}</div>
+                <div>Length {settings.length ?? 47}</div>
+                <div>Multiplier {settings.mult ?? 1.6}</div>
+                <div>Source {(settings.source ?? "hlc3").toUpperCase()}</div>
+                <div>Timeframe {settings.timeframe ?? "Daily"}</div>
               </div>
             </section>
 
             <section className="mb-10 rounded border border-[var(--line)] bg-white p-2">
-              <VortexChart
+              <PriceChart
                 prices={prices}
                 indicators={indicators}
                 triggers={triggers.map((t) => ({

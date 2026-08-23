@@ -16,7 +16,7 @@ const mono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: "ScreamerScreener",
-  description: "Vortex Bands stock screener and research",
+  description: "Stock screener and research",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
