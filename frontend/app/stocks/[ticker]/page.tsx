@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { SiteHeader } from "@/components/site-header";
 import { PriceChart } from "@/components/price-chart";
+import { SecondaryIndicatorsPanel } from "@/components/secondary-indicators-panel";
 import {
   fetchIndicators,
   fetchPrices,
+  fetchSecondaryIndicators,
   fetchStock,
   fetchStockTriggers,
   formatDay,
@@ -24,14 +26,17 @@ export default async function StockPage({
   let prices: Awaited<ReturnType<typeof fetchPrices>> = [];
   let indicators: Awaited<ReturnType<typeof fetchIndicators>> = [];
   let triggers: Awaited<ReturnType<typeof fetchStockTriggers>> = [];
+  let secondary: Awaited<ReturnType<typeof fetchSecondaryIndicators>> | null =
+    null;
   let error: string | null = null;
 
   try {
-    [stock, prices, indicators, triggers] = await Promise.all([
+    [stock, prices, indicators, triggers, secondary] = await Promise.all([
       fetchStock(upper),
       fetchPrices(upper),
       fetchIndicators(upper),
       fetchStockTriggers(upper),
+      fetchSecondaryIndicators(upper),
     ]);
   } catch (err) {
     error = err instanceof Error ? err.message : "Failed to load stock";
@@ -99,14 +104,26 @@ export default async function StockPage({
                 ) : (
                   <ul>
                     {triggers.map((t) => (
-                      <li key={t.id} className="border-b border-[var(--line)] px-4 py-3 text-sm">
-                        <Link href={`/triggers/${t.id}`} className="flex justify-between gap-3 hover:underline">
+                      <li
+                        key={t.id}
+                        className="border-b border-[var(--line)] px-4 py-3 text-sm"
+                      >
+                        <Link
+                          href={`/triggers/${t.id}`}
+                          className="flex justify-between gap-3 hover:underline"
+                        >
                           <span>
                             <span className="font-medium">{t.trigger_type}</span>
-                            <span className="text-[var(--muted)]"> · {formatDay(t.date)}</span>
+                            <span className="text-[var(--muted)]">
+                              {" "}
+                              · {formatDay(t.date)}
+                            </span>
                           </span>
                           <span className="font-mono">
-                            {formatPrice(Number(t.trigger_price), String(stock.currency))}
+                            {formatPrice(
+                              Number(t.trigger_price),
+                              String(stock.currency),
+                            )}
                           </span>
                         </Link>
                       </li>
@@ -120,9 +137,11 @@ export default async function StockPage({
               <h2 className="mb-3 text-sm font-semibold tracking-[0.15em] text-[var(--muted)]">
                 SECONDARY INDICATORS
               </h2>
-              <p className="rounded border border-dashed border-[var(--line)] bg-white p-4 text-sm text-[var(--muted)]">
-                Coming in next phase
-              </p>
+              <SecondaryIndicatorsPanel
+                latest={secondary?.latest ?? null}
+                marketRegime={secondary?.market_regime ?? null}
+                note={secondary?.note}
+              />
             </section>
           </>
         )}

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from backend.backtest.performance import calculate_performance_from_closes
+from backend.backtest.performance import (
+    calculate_performance_from_closes,
+    performance_from_price_series,
+    performance_needs_update,
+)
 from backend.indicators.vortex_bands import (
     alpha_from_length,
     calculate_vortex_bands,
@@ -141,6 +145,29 @@ def test_performance_long_short_and_null_horizons() -> None:
         closes_after=[90.0],
     )
     assert abs(short_perf.return_1d - (100 / 90 - 1)) < 1e-12
+
+
+def test_performance_needs_update_when_partial() -> None:
+    perf = {"return_1d": -0.0057, "return_3d": None}
+    assert performance_needs_update(perf, future_trading_days=5) is True
+    assert performance_needs_update(perf, future_trading_days=1) is False
+
+
+def test_performance_from_price_series_fills_horizons() -> None:
+    prices = [
+        {"date": f"2026-01-{d:02d}", "close": 100.0 + d}
+        for d in range(1, 11)
+    ]
+    perf = performance_from_price_series(
+        prices,
+        trigger_date="2026-01-02",
+        trigger_type="LONG",
+        trigger_price=102.0,
+    )
+    assert perf.return_1d is not None
+    assert perf.return_3d is not None
+    assert perf.return_5d is not None
+    assert perf.return_10d is None
 
 
 def test_idempotent_candle_merge_logic() -> None:

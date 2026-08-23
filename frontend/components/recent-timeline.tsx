@@ -72,19 +72,21 @@ export function RecentTimeline({ days }: { days: Day[] }) {
         </div>
       </div>
 
-      <div className="space-y-6">
-        {filtered.map((day) => (
-          <div key={day.date} className="border-t border-[var(--line)] pt-3">
-            <div className="mb-2 font-mono text-xs tracking-wide text-[var(--muted)]">
-              {weekdayLabel(day.date)}
+      <div className="max-h-[28rem] overflow-y-auto rounded border border-[var(--line)] bg-white px-4 py-3">
+        <div className="space-y-6">
+          {filtered.map((day) => (
+            <div key={day.date} className="border-t border-[var(--line)] pt-3 first:border-t-0 first:pt-0">
+              <div className="mb-2 font-mono text-xs tracking-wide text-[var(--muted)]">
+                {weekdayLabel(day.date)}
+              </div>
+              {day.items.length === 0 ? (
+                <p className="text-sm text-[var(--muted)]">No triggers</p>
+              ) : (
+                day.items.map((t) => <TriggerRow key={t.id} trigger={t} />)
+              )}
             </div>
-            {day.items.length === 0 ? (
-              <p className="text-sm text-[var(--muted)]">No triggers</p>
-            ) : (
-              day.items.map((t) => <TriggerRow key={t.id} trigger={t} />)
-            )}
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     </section>
   );

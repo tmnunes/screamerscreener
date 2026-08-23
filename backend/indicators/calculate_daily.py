@@ -8,8 +8,10 @@ import sys
 from datetime import datetime, timezone
 from typing import Any
 
-from backend.backtest.performance import calculate_performance_from_closes
+from backend.backtest.performance import performance_from_price_series, performance_to_row
 from backend.db import get_supabase
+from backend.indicators.market_regime import upsert_market_regime
+from backend.indicators.secondary import calculate_secondary_indicators
 from backend.indicators.vortex_bands import (
     DEFAULT_LENGTH,
     DEFAULT_MULT,
@@ -125,6 +127,34 @@ def _upsert_triggers(
     return rows
 
 
+def _upsert_secondary_indicators(
+    instrument_id: str, prices: list[dict[str, Any]]
+) -> int:
+    """Persist secondary indicators. Never touches triggers_daily."""
+    dates = [p["date"] for p in prices]
+    highs = [float(p["high"]) for p in prices]
+    lows = [float(p["low"]) for p in prices]
+    closes = [float(p["close"]) for p in prices]
+    volumes = [float(p.get("volume") or 0) for p in prices]
+    rows_calc = calculate_secondary_indicators(dates, highs, lows, closes, volumes)
+
+    now = datetime.now(timezone.utc).isoformat()
+    rows = []
+    for row in rows_calc:
+        payload = row.as_db_row(instrument_id)
+        payload["updated_at"] = now
+        rows.append(payload)
+
+    client = get_supabase()
+    chunk_size = 500
+    for i in range(0, len(rows), chunk_size):
+        client.table("secondary_indicator_values_daily").upsert(
+            rows[i : i + chunk_size],
+            on_conflict="instrument_id,date",
+        ).execute()
+    return len(rows)
+
+
 def _update_performance_for_instrument(
     instrument_id: str,
     prices: list[dict[str, Any]],
@@ -145,35 +175,28 @@ def _update_performance_for_instrument(
     ).data or []
 
     date_to_idx = {p["date"]: i for i, p in enumerate(prices)}
-    closes = [float(p["close"]) for p in prices]
-    updated = 0
+    perf_rows: list[dict[str, Any]] = []
 
     for trig in triggers:
         idx = date_to_idx.get(trig["date"])
         if idx is None:
             continue
-        closes_after = closes[idx + 1 :]
-        perf = calculate_performance_from_closes(
+        perf = performance_from_price_series(
+            prices,
+            trigger_date=trig["date"],
             trigger_type=trig["trigger_type"],
             trigger_price=float(trig["trigger_price"]),
-            closes_after=closes_after,
         )
-        row = {
-            "trigger_id": trig["id"],
-            "return_1d": perf.return_1d,
-            "return_3d": perf.return_3d,
-            "return_5d": perf.return_5d,
-            "return_10d": perf.return_10d,
-            "return_20d": perf.return_20d,
-            "max_favorable_return": perf.max_favorable_return,
-            "max_adverse_return": perf.max_adverse_return,
-            "calculated_at": datetime.now(timezone.utc).isoformat(),
-        }
+        perf_rows.append(performance_to_row(trig["id"], perf))
+
+    client = get_supabase()
+    chunk_size = 200
+    for i in range(0, len(perf_rows), chunk_size):
         client.table("trigger_performance").upsert(
-            row, on_conflict="trigger_id"
+            perf_rows[i : i + chunk_size],
+            on_conflict="trigger_id",
         ).execute()
-        updated += 1
-    return updated
+    return len(perf_rows)
 
 
 def calculate_for_all(
@@ -197,6 +220,9 @@ def calculate_for_all(
             n_ind = _upsert_indicators(
                 inst["id"], prices, length=length, mult=mult, source=source
             )
+            # Secondary indicators are informational only — they do not
+            # create, block, or modify LONG / SHORT / STOP triggers.
+            n_sec = _upsert_secondary_indicators(inst["id"], prices)
             triggers = _upsert_triggers(
                 inst["id"], prices, length=length, mult=mult, source=source
             )
@@ -206,19 +232,23 @@ def calculate_for_all(
             per_ticker[ticker] = {
                 "prices": len(prices),
                 "indicators": n_ind,
+                "secondary": n_sec,
                 "triggers": len(triggers),
                 "performance": n_perf,
             }
             print(
-                f"{ticker:8} prices={len(prices)} indicators={n_ind} "
-                f"triggers={len(triggers)} perf={n_perf}"
+                f"{ticker:8} prices={len(prices)} vortex={n_ind} "
+                f"secondary={n_sec} triggers={len(triggers)} perf={n_perf}"
             )
+
+        regime_rows = upsert_market_regime()
 
         detail = {
             "length": length,
             "mult": mult,
             "source": source,
             "per_ticker": per_ticker,
+            "market_regime_rows": regime_rows,
         }
         finish_pipeline_run(
             run_id, status="success", detail=detail, api_requests_used=0

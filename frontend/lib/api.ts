@@ -40,6 +40,12 @@ export type Trigger = {
     return_10d: number | null;
     return_20d: number | null;
   } | null;
+  performance_meta?: {
+    future_trading_days: number;
+    last_market_date: string | null;
+    horizons: Record<"1d" | "3d" | "5d" | "10d" | "20d", boolean>;
+    horizon_dates?: Record<"1d" | "3d" | "5d" | "10d" | "20d", string | null>;
+  };
 };
 
 export const fetchToday = () =>
@@ -107,6 +113,15 @@ export const fetchIndicators = (ticker: string) =>
       lower: number;
     }>
   >(`/api/stocks/${ticker}/indicators`);
+
+export const fetchSecondaryIndicators = (ticker: string) =>
+  api<{
+    ticker: string;
+    latest: Record<string, unknown> | null;
+    series: Array<Record<string, unknown>>;
+    market_regime: Record<string, unknown> | null;
+    note: string;
+  }>(`/api/stocks/${ticker}/secondary-indicators`);
 
 export const fetchStockTriggers = (ticker: string) =>
   api<Trigger[]>(`/api/stocks/${ticker}/triggers`);

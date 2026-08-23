@@ -42,6 +42,13 @@ INSTRUMENTS: tuple[InstrumentConfig, ...] = (
     InstrumentConfig("AVGO", "AVGO.US", "US", "USA", "Broadcom", "USD"),
     InstrumentConfig("AMD", "AMD.US", "US", "USA", "AMD", "USD"),
     InstrumentConfig("JPM", "JPM.US", "US", "USA", "JPMorgan Chase", "USD"),
+    # Market regime context (inactive by default — enable later; costs EODHD quota)
+    InstrumentConfig(
+        "SPY", "SPY.US", "US", "USA", "SPDR S&P 500 ETF", "USD", active=False
+    ),
+    InstrumentConfig(
+        "QQQ", "QQQ.US", "US", "USA", "Invesco QQQ Trust", "USD", active=False
+    ),
 )
 
 

@@ -4,6 +4,14 @@ import { fetchTrigger, formatDay, formatPct, formatPrice } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
+const HORIZONS = [
+  { key: "1d" as const, label: "+1D", field: "return_1d" as const, days: 1 },
+  { key: "3d" as const, label: "+3D", field: "return_3d" as const, days: 3 },
+  { key: "5d" as const, label: "+5D", field: "return_5d" as const, days: 5 },
+  { key: "10d" as const, label: "+10D", field: "return_10d" as const, days: 10 },
+  { key: "20d" as const, label: "+20D", field: "return_20d" as const, days: 20 },
+];
+
 export default async function TriggerDetailPage({
   params,
 }: {
@@ -20,6 +28,9 @@ export default async function TriggerDetailPage({
   }
 
   const perf = trigger?.performance;
+  const meta = trigger?.performance_meta;
+  const futureDays = meta?.future_trading_days ?? 0;
+  const isComplete = futureDays >= 20;
 
   return (
     <>
@@ -65,11 +76,59 @@ export default async function TriggerDetailPage({
               </Block>
 
               <Block title="Performance">
-                <Row label="+1D" value={formatPct(perf?.return_1d)} />
-                <Row label="+3D" value={formatPct(perf?.return_3d)} />
-                <Row label="+5D" value={formatPct(perf?.return_5d)} />
-                <Row label="+10D" value={formatPct(perf?.return_10d)} />
-                <Row label="+20D" value={formatPct(perf?.return_20d)} />
+                <div className="mb-4 space-y-2 rounded bg-[#faf8f4] p-3 text-xs text-[var(--muted)]">
+                  <p>
+                    <strong className="text-[var(--ink)]">How this works:</strong>{" "}
+                    +1D / +3D / +5D measure the return at the close of the 1st, 3rd,
+                    5th… <em>trading day after this trigger</em> — not calendar days,
+                    and not data from before the trigger.
+                  </p>
+                  <p>
+                    Your 1 year of history lets us compute full performance for{" "}
+                    <strong className="text-[var(--ink)]">older triggers</strong>{" "}
+                    (20+ trading days before the last candle). This trigger has{" "}
+                    <strong className="text-[var(--ink)]">{futureDays}</strong> trading
+                    day{futureDays === 1 ? "" : "s"} after it
+                    {meta?.last_market_date
+                      ? ` (last data: ${formatDay(meta.last_market_date)})`
+                      : ""}
+                    .
+                  </p>
+                  {!isComplete ? (
+                    <p>
+                      Dashboard highlights recent signals — they will look incomplete
+                      until more daily candles arrive. See{" "}
+                      <Link
+                        href={`/stocks/${trigger.ticker}`}
+                        className="underline"
+                      >
+                        {trigger.ticker} history
+                      </Link>{" "}
+                      for older triggers with full +20D metrics.
+                    </p>
+                  ) : null}
+                </div>
+
+                {HORIZONS.map(({ key, label, field, days }) => {
+                  const available = meta?.horizons?.[key] ?? false;
+                  const horizonDate = meta?.horizon_dates?.[key];
+                  const value = perf?.[field];
+                  const display =
+                    value !== null && value !== undefined
+                      ? formatPct(value)
+                      : available
+                        ? "N/A"
+                        : "Pending";
+                  const sublabel = horizonDate
+                    ? `close ${formatDay(horizonDate)}`
+                    : available
+                      ? undefined
+                      : `needs ${days} trading days after trigger`;
+
+                  return (
+                    <Row key={key} label={label} value={display} hint={sublabel} />
+                  );
+                })}
               </Block>
             </section>
 
@@ -78,7 +137,7 @@ export default async function TriggerDetailPage({
                 href={`/stocks/${trigger.ticker}`}
                 className="text-sm font-medium underline"
               >
-                View {trigger.ticker} chart
+                View {trigger.ticker} trigger history
               </Link>
             </div>
           </>
@@ -99,11 +158,24 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function Row({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+}) {
   return (
     <div className="flex justify-between gap-4 border-b border-[var(--line)] py-1.5 last:border-0">
       <span className="text-[var(--muted)]">{label}</span>
-      <span className="font-mono">{value}</span>
+      <span className="text-right">
+        <span className="font-mono">{value}</span>
+        {hint ? (
+          <span className="mt-0.5 block text-[10px] text-[var(--muted)]">{hint}</span>
+        ) : null}
+      </span>
     </div>
   );
 }

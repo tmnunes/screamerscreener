@@ -11,6 +11,7 @@ from backend.api.deps import (
     default_params,
     enrich_triggers,
     get_instrument_by_ticker,
+    get_trigger_by_id,
     latest_market_date,
     latest_pipeline,
 )
@@ -106,6 +107,62 @@ def get_indicators(
         .eq("length", length)
         .eq("mult", mult)
         .eq("source", source)
+        .order("date", desc=True)
+        .limit(limit)
+        .execute()
+    ).data or []
+    return list(reversed(rows))
+
+
+@router.get("/api/stocks/{ticker}/secondary-indicators")
+def get_secondary_indicators(
+    ticker: str,
+    limit: int = Query(default=400, ge=1, le=5000),
+) -> dict[str, Any]:
+    """Secondary indicators for a stock. Informational only — not used for triggers."""
+    inst = get_instrument_by_ticker(ticker)
+    if not inst:
+        raise HTTPException(status_code=404, detail="Stock not found")
+    client = get_supabase()
+    rows = (
+        client.table("secondary_indicator_values_daily")
+        .select("*")
+        .eq("instrument_id", inst["id"])
+        .order("date", desc=True)
+        .limit(limit)
+        .execute()
+    ).data or []
+    series = list(reversed(rows))
+    latest = series[-1] if series else None
+
+    regime = None
+    if latest:
+        regime_rows = (
+            client.table("market_regime_daily")
+            .select("*")
+            .eq("date", latest["date"])
+            .limit(1)
+            .execute()
+        ).data or []
+        regime = regime_rows[0] if regime_rows else None
+
+    return {
+        "ticker": ticker.upper(),
+        "latest": latest,
+        "series": series,
+        "market_regime": regime,
+        "note": "Secondary indicators are informational and do not generate or block triggers.",
+    }
+
+
+@router.get("/api/market-regime")
+def get_market_regime(
+    limit: int = Query(default=30, ge=1, le=500),
+) -> list[dict[str, Any]]:
+    client = get_supabase()
+    rows = (
+        client.table("market_regime_daily")
+        .select("*")
         .order("date", desc=True)
         .limit(limit)
         .execute()
@@ -260,13 +317,10 @@ def list_triggers(
 
 @router.get("/api/triggers/{trigger_id}")
 def get_trigger(trigger_id: str) -> dict[str, Any]:
-    client = get_supabase()
-    rows = (
-        client.table("triggers_daily").select("*").eq("id", trigger_id).limit(1).execute()
-    ).data or []
-    if not rows:
+    row = get_trigger_by_id(trigger_id)
+    if not row:
         raise HTTPException(status_code=404, detail="Trigger not found")
-    return enrich_triggers(rows)[0]
+    return row
 
 
 @router.get("/api/stats")
