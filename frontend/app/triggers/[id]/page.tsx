@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { SiteHeader } from "@/components/site-header";
+import { SecondarySignalPanel } from "@/components/secondary-signals";
 import { fetchTrigger, formatDay, formatPct, formatPrice } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
@@ -59,6 +60,18 @@ export default async function TriggerDetailPage({
                 <Row
                   label="Price"
                   value={formatPrice(Number(trigger.trigger_price), trigger.currency)}
+                />
+              </Block>
+
+              <Block title="Secondary semáforos">
+                <p className="mb-4 text-xs text-[var(--muted)]">
+                  Verde = secundários alinhados com este {trigger.trigger_type}.
+                  Vermelho = contradizem. Neutro = inconclusivo. Não altera o trigger
+                  Vortex.
+                </p>
+                <SecondarySignalPanel
+                  signals={trigger.secondary_signals}
+                  triggerType={trigger.trigger_type}
                 />
               </Block>
 

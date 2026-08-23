@@ -14,6 +14,7 @@ from backend.backtest.performance import (
     HORIZON_OFFSETS,
 )
 from backend.db import get_supabase
+from backend.indicators.secondary_signals import evaluate_secondary_signals
 from backend.indicators.vortex_bands import DEFAULT_LENGTH, DEFAULT_MULT, DEFAULT_SOURCE
 
 TRIGGER_SELECT = (
@@ -98,6 +99,52 @@ def _fetch_prices_for_instrument(instrument_id: str) -> list[dict[str, Any]]:
         .order("date")
         .execute()
     ).data or []
+
+
+def _fetch_secondary_map(
+    triggers: list[dict[str, Any]],
+) -> dict[tuple[str, str], dict[str, Any]]:
+    if not triggers:
+        return {}
+    client = get_supabase()
+    instrument_ids = list({t["instrument_id"] for t in triggers})
+    dates = list({t["date"] for t in triggers})
+    rows = (
+        client.table("secondary_indicator_values_daily")
+        .select("*")
+        .in_("instrument_id", instrument_ids)
+        .in_("date", dates)
+        .execute()
+    ).data or []
+    return {(r["instrument_id"], r["date"]): r for r in rows}
+
+
+def _fetch_regime_map(dates: list[str]) -> dict[str, dict[str, Any]]:
+    if not dates:
+        return {}
+    client = get_supabase()
+    rows = (
+        client.table("market_regime_daily")
+        .select("*")
+        .in_("date", dates)
+        .execute()
+    ).data or []
+    return {r["date"]: r for r in rows}
+
+
+def _attach_secondary_signals(
+    trigger: dict[str, Any],
+    secondary_map: dict[tuple[str, str], dict[str, Any]],
+    regime_map: dict[str, dict[str, Any]],
+) -> None:
+    key = (trigger["instrument_id"], trigger["date"])
+    summary = evaluate_secondary_signals(
+        trigger_type=trigger["trigger_type"],
+        trigger_price=float(trigger["trigger_price"]),
+        secondary_row=secondary_map.get(key),
+        market_regime=regime_map.get(trigger["date"]),
+    )
+    trigger["secondary_signals"] = summary.as_dict() if summary else None
 
 
 def _refresh_performance(
@@ -189,6 +236,10 @@ def enrich_triggers(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             )
 
     _refresh_performance(flat_rows)
+    secondary_map = _fetch_secondary_map(flat_rows)
+    regime_map = _fetch_regime_map(list({t["date"] for t in flat_rows}))
+    for item in flat_rows:
+        _attach_secondary_signals(item, secondary_map, regime_map)
     by_id = {item["id"]: item for item in flat_rows}
     return [by_id.get(r["id"], {**r, "performance": None}) for r in rows]
 
@@ -234,6 +285,9 @@ def get_trigger_by_id(trigger_id: str) -> dict[str, Any] | None:
     prices = _fetch_prices_for_instrument(flat["instrument_id"])
     _refresh_performance([flat], force=True)
     _attach_performance_meta(flat, prices)
+    secondary_map = _fetch_secondary_map([flat])
+    regime_map = _fetch_regime_map([flat["date"]])
+    _attach_secondary_signals(flat, secondary_map, regime_map)
     return flat
 
 

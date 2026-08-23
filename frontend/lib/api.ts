@@ -46,6 +46,21 @@ export type Trigger = {
     horizons: Record<"1d" | "3d" | "5d" | "10d" | "20d", boolean>;
     horizon_dates?: Record<"1d" | "3d" | "5d" | "10d" | "20d", string | null>;
   };
+  secondary_signals?: {
+    overall: "green" | "red" | "neutral";
+    score: number;
+    green: number;
+    red: number;
+    neutral: number;
+    categories: Record<string, "green" | "red" | "neutral">;
+    indicators: Array<{
+      key: string;
+      label: string;
+      category: string;
+      signal: "green" | "red" | "neutral";
+      hint: string;
+    }>;
+  } | null;
 };
 
 export const fetchToday = () =>

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { Trigger } from "@/lib/api";
 import { formatDay, formatPrice } from "@/lib/api";
+import { SecondarySignalStrip } from "@/components/secondary-signals";
 
 const styles = {
   LONG: { label: "LONG", color: "text-[var(--long)]", dot: "bg-[var(--long)]" },
@@ -18,19 +19,22 @@ export function TriggerCard({ trigger }: { trigger: Trigger }) {
   const style = styles[trigger.trigger_type];
   return (
     <Link
-      href={`/stocks/${trigger.ticker}`}
+      href={`/triggers/${trigger.id}`}
       className="block border-b border-[var(--line)] py-3 transition hover:bg-[#faf8f4]"
     >
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0 flex-1">
           <div className={`mb-1 flex items-center gap-2 text-xs font-medium ${style.color}`}>
             <span className={`h-2 w-2 rounded-full ${style.dot}`} />
             {style.label}
           </div>
           <div className="text-lg font-semibold tracking-tight">{trigger.ticker}</div>
           <div className="text-sm text-[var(--muted)]">{trigger.name}</div>
+          <div className="mt-2">
+            <SecondarySignalStrip signals={trigger.secondary_signals} compact />
+          </div>
         </div>
-        <div className="text-right text-sm">
+        <div className="shrink-0 text-right text-sm">
           <div className="font-mono">
             {formatPrice(Number(trigger.trigger_price), trigger.currency)}
           </div>
@@ -49,9 +53,12 @@ export function TriggerRow({ trigger }: { trigger: Trigger }) {
       href={`/triggers/${trigger.id}`}
       className="flex items-center gap-3 py-1.5 text-sm hover:underline"
     >
-      <span className={`h-2 w-2 rounded-full ${style.dot}`} />
+      <span className={`h-2 w-2 shrink-0 rounded-full ${style.dot}`} />
       <span className="font-medium">{trigger.ticker}</span>
       <span className={style.color}>{style.label}</span>
+      <span className="ml-auto">
+        <SecondarySignalStrip signals={trigger.secondary_signals} compact />
+      </span>
     </Link>
   );
 }
