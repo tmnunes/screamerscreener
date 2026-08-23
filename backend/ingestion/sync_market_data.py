@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def run_sync() -> dict:
+    """Incremental sync for STOCK instruments only (EODHD)."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     provider = EodhdProvider()
     run_id = start_pipeline_run("ingestion")
@@ -28,7 +29,7 @@ def run_sync() -> dict:
     total_rows = 0
 
     try:
-        instruments = list_active_instruments()
+        instruments = list_active_instruments(asset_type="STOCK")
         today = date.today()
 
         for inst in instruments:
@@ -59,6 +60,8 @@ def run_sync() -> dict:
 
         detail = {
             "mode": "sync",
+            "asset_type": "STOCK",
+            "provider": "EODHD",
             "per_ticker": summary,
             "skipped": skipped,
             "total_rows": total_rows,
@@ -78,7 +81,7 @@ def run_sync() -> dict:
         finish_pipeline_run(
             run_id,
             status="failed",
-            detail={"error": str(exc), "per_ticker": summary},
+            detail={"error": str(exc), "per_ticker": summary, "asset_type": "STOCK"},
             api_requests_used=provider.requests_used,
         )
         raise
@@ -86,7 +89,7 @@ def run_sync() -> dict:
         finish_pipeline_run(
             run_id,
             status="failed",
-            detail={"error": str(exc), "per_ticker": summary},
+            detail={"error": str(exc), "per_ticker": summary, "asset_type": "STOCK"},
             api_requests_used=provider.requests_used,
         )
         raise

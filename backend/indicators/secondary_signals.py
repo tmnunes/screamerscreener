@@ -238,6 +238,36 @@ def _evaluate_rules(
                 not bool(qqq),
                 "US growth / tech",
             )
+        btc50 = regime.get("btc_above_sma50")
+        if btc50 is not None:
+            add(
+                "btc_sma50",
+                "BTC > SMA50",
+                "MARKET REGIME",
+                bool(btc50),
+                not bool(btc50),
+                "Crypto benchmark",
+            )
+        btc200 = regime.get("btc_above_sma200")
+        if btc200 is not None:
+            add(
+                "btc_sma200",
+                "BTC > SMA200",
+                "MARKET REGIME",
+                bool(btc200),
+                not bool(btc200),
+                "Crypto benchmark",
+            )
+        btc_rsi = _num(regime, "btc_rsi14")
+        if btc_rsi is not None:
+            add(
+                "btc_rsi",
+                "BTC RSI14",
+                "MARKET REGIME",
+                btc_rsi >= 55,
+                btc_rsi <= 45,
+                f"BTC RSI {btc_rsi:.1f}",
+            )
 
     return signals
 

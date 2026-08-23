@@ -64,18 +64,22 @@ export type Trigger = {
   } | null;
 };
 
-export const fetchToday = () =>
+export type AssetType = "STOCK" | "CRYPTO";
+
+export const fetchToday = (assetType: AssetType = "STOCK") =>
   api<{
     date: string | null;
+    asset_type?: AssetType;
     long: Trigger[];
     short: Trigger[];
     stop: Trigger[];
-  }>("/api/triggers/today");
+  }>(`/api/triggers/today?asset_type=${assetType}`);
 
-export const fetchRecent = (days = 30) =>
+export const fetchRecent = (days = 30, assetType: AssetType = "STOCK") =>
   api<{
     from: string | null;
     to: string | null;
+    asset_type?: AssetType;
     days: Array<{
       date: string;
       long: Trigger[];
@@ -83,17 +87,19 @@ export const fetchRecent = (days = 30) =>
       stop: Trigger[];
       all: Trigger[];
     }>;
-  }>(`/api/triggers/recent?days=${days}`);
+  }>(`/api/triggers/recent?days=${days}&asset_type=${assetType}`);
 
 /** @deprecated use fetchRecent */
 export const fetchWeek = () => fetchRecent(30);
 
-export const fetchStats = () =>
+export const fetchStats = (assetType: AssetType = "STOCK") =>
   api<{
+    asset_type?: AssetType;
     stocks: number;
+    instruments?: number;
     today: { date: string | null; long: number; short: number; stop: number };
     last_market_date: string | null;
-  }>("/api/stats");
+  }>(`/api/stats?asset_type=${assetType}`);
 
 export type LongHorizonStats = {
   min: number | null;
@@ -115,26 +121,68 @@ export type LongPerformanceStats = {
   note: string;
   ticker?: string;
   name?: string | null;
+  asset_type?: AssetType;
 };
 
-export const fetchLongPerformanceStats = () =>
-  api<LongPerformanceStats>("/api/stats/long-performance");
+export const fetchLongPerformanceStats = (assetType: AssetType = "STOCK") =>
+  api<LongPerformanceStats>(
+    `/api/stats/long-performance?asset_type=${assetType}`,
+  );
 
 export const fetchStockLongStats = (ticker: string) =>
   api<LongPerformanceStats>(`/api/stocks/${ticker}/long-stats`);
 
-export const fetchDataStatus = () =>
-  api<{
-    last_daily_candle: string | null;
-    last_ingestion: string | null;
-    last_calculation: string | null;
-    instruments: number;
-    instruments_with_data: number;
-    api_requests_used: number;
-    api_requests_limit: number;
-  }>("/api/data-status");
+export type DataStatus = {
+  asset_type?: AssetType;
+  provider?: string;
+  last_daily_candle: string | null;
+  last_ingestion: string | null;
+  last_calculation: string | null;
+  last_refresh?: string | null;
+  instruments: number;
+  instruments_with_data: number;
+  api_requests_used: number;
+  api_requests_limit: number;
+  max_requests_per_run?: number;
+  status?: string;
+  top_n?: number | null;
+  stocks?: DataStatus;
+  crypto?: DataStatus;
+};
 
-export const fetchStock = (ticker: string) => api<Record<string, unknown>>(`/api/stocks/${ticker}`);
+export const fetchDataStatus = () => api<DataStatus>("/api/data-status");
+
+export const fetchDataStatusStocks = () =>
+  api<DataStatus>("/api/data-status/stocks");
+
+export const fetchDataStatusCrypto = () =>
+  api<DataStatus>("/api/data-status/crypto");
+
+export type CryptoOverviewRow = {
+  rank: number | null;
+  ticker: string;
+  name: string;
+  in_top_universe?: boolean;
+  price: number | null;
+  change_24h: number | null;
+  trigger: string | null;
+  rsi14: number | null;
+  adx14: number | null;
+  relative_volume: number | null;
+  trend: string | null;
+  last_trigger: { id: string; date: string; trigger_type: string } | null;
+};
+
+export const fetchCryptoOverview = () =>
+  api<{
+    top_n: number;
+    last_data: string | null;
+    last_refresh: string | null;
+    rows: CryptoOverviewRow[];
+  }>("/api/crypto/overview");
+
+export const fetchStock = (ticker: string) =>
+  api<Record<string, unknown>>(`/api/stocks/${ticker}`);
 
 export const fetchPrices = (ticker: string) =>
   api<
@@ -174,6 +222,12 @@ export const fetchTrigger = (id: string) => api<Trigger>(`/api/triggers/${id}`);
 
 export const refreshData = () =>
   api<{ status: string }>("/api/refresh", { method: "POST" });
+
+export const refreshStocks = () =>
+  api<{ status: string }>("/api/refresh/stocks", { method: "POST" });
+
+export const refreshCrypto = () =>
+  api<{ status: string }>("/api/refresh/crypto", { method: "POST" });
 
 export function formatPrice(value: number, currency?: string) {
   const prefix = currency === "EUR" ? "€" : currency === "USD" ? "$" : "";

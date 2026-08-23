@@ -28,9 +28,9 @@ def run_initial_load(*, seed: bool = True) -> dict:
     total_rows = 0
 
     try:
-        instruments = list_active_instruments()
+        instruments = list_active_instruments(asset_type="STOCK")
         if not instruments:
-            raise RuntimeError("No active instruments in database. Run seed first.")
+            raise RuntimeError("No active STOCK instruments in database. Run seed first.")
 
         from_date = provider.default_history_from_date()
         for inst in instruments:
@@ -45,6 +45,8 @@ def run_initial_load(*, seed: bool = True) -> dict:
 
         detail = {
             "mode": "initial_load",
+            "asset_type": "STOCK",
+            "provider": "EODHD",
             "per_ticker": summary,
             "total_rows": total_rows,
         }

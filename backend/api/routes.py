@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -12,16 +12,40 @@ from backend.api.deps import (
     enrich_triggers,
     get_instrument_by_ticker,
     get_trigger_by_id,
+    instrument_ids_for_asset_type,
     latest_market_date,
-    latest_pipeline,
+)
+from backend.api.asset_pipelines import (
+    data_status_for,
+    refresh_crypto,
+    refresh_stocks,
 )
 from backend.backtest.long_stats import summarize_long_performance
 from backend.config import get_settings
 from backend.db import get_supabase
-from backend.indicators.calculate_daily import calculate_for_all
-from backend.ingestion.sync_market_data import run_sync
 
 router = APIRouter()
+
+
+def _normalize_asset_type(asset_type: str | None) -> str | None:
+    if asset_type is None:
+        return None
+    value = asset_type.upper()
+    if value not in {"STOCK", "CRYPTO"}:
+        raise HTTPException(status_code=400, detail="asset_type must be STOCK or CRYPTO")
+    return value
+
+
+def _filter_by_asset_type(
+    query: Any, asset_type: str | None
+) -> Any | None:
+    """Return query filtered by instrument ids, or None if empty universe."""
+    if not asset_type:
+        return query
+    ids = instrument_ids_for_asset_type(asset_type)
+    if not ids:
+        return None
+    return query.in_("instrument_id", ids)
 
 
 @router.get("/api/health")
@@ -35,16 +59,29 @@ def health() -> dict[str, str]:
     }
 
 
-@router.get("/api/stocks")
-def list_stocks() -> list[dict[str, Any]]:
+@router.get("/api/instruments")
+def list_instruments(
+    asset_type: str = Query(default="STOCK"),
+) -> list[dict[str, Any]]:
+    asset = _normalize_asset_type(asset_type) or "STOCK"
     client = get_supabase()
-    return (
+    query = (
         client.table("market_instruments")
         .select("*")
         .eq("active", True)
-        .order("ticker")
-        .execute()
-    ).data or []
+        .eq("asset_type", asset)
+    )
+    if asset == "CRYPTO":
+        query = query.order("crypto_rank")
+    else:
+        query = query.order("ticker")
+    return query.execute().data or []
+
+
+@router.get("/api/stocks")
+def list_stocks() -> list[dict[str, Any]]:
+    """Backward-compatible: active STOCK instruments only."""
+    return list_instruments(asset_type="STOCK")
 
 
 @router.get("/api/stocks/{ticker}")
@@ -201,25 +238,39 @@ def get_stock_triggers(
 
 
 @router.get("/api/triggers/today")
-def triggers_today() -> dict[str, Any]:
-    market_date = latest_market_date()
+def triggers_today(
+    asset_type: str | None = Query(default=None),
+) -> dict[str, Any]:
+    asset = _normalize_asset_type(asset_type)
+    # Default (no filter): STOCK only — keeps legacy dashboard stock-only
+    scope = asset or "STOCK"
+    market_date = latest_market_date(scope)
     if market_date is None:
-        return {"date": None, "long": [], "short": [], "stop": []}
+        return {"date": None, "asset_type": scope, "long": [], "short": [], "stop": []}
 
     d_length, d_mult, d_source = default_params()
     client = get_supabase()
-    rows = (
+    query = (
         client.table("triggers_daily")
         .select("*")
         .eq("date", market_date.isoformat())
         .eq("length", d_length)
         .eq("mult", d_mult)
         .eq("source", d_source)
-        .execute()
-    ).data or []
-    enriched = enrich_triggers(rows)
+    )
+    query = _filter_by_asset_type(query, scope)
+    if query is None:
+        return {
+            "date": market_date.isoformat(),
+            "asset_type": scope,
+            "long": [],
+            "short": [],
+            "stop": [],
+        }
+    enriched = enrich_triggers(query.execute().data or [])
     return {
         "date": market_date.isoformat(),
+        "asset_type": scope,
         "long": [t for t in enriched if t["trigger_type"] == "LONG"],
         "short": [t for t in enriched if t["trigger_type"] == "SHORT"],
         "stop": [t for t in enriched if t["trigger_type"] == "STOP"],
@@ -228,17 +279,20 @@ def triggers_today() -> dict[str, Any]:
 
 @router.get("/api/triggers/week")
 @router.get("/api/triggers/recent")
-def triggers_recent(days: int = Query(default=30, ge=1, le=90)) -> dict[str, Any]:
+def triggers_recent(
+    days: int = Query(default=30, ge=1, le=90),
+    asset_type: str | None = Query(default=None),
+) -> dict[str, Any]:
     """Last N trading days with triggers, newest first."""
-    market_date = latest_market_date()
+    scope = _normalize_asset_type(asset_type) or "STOCK"
+    market_date = latest_market_date(scope)
     if market_date is None:
-        return {"from": None, "to": None, "days": []}
+        return {"from": None, "to": None, "asset_type": scope, "days": []}
 
-    # Calendar buffer so we still cover `days` trading sessions
     start = market_date - timedelta(days=days * 2 + 5)
     d_length, d_mult, d_source = default_params()
     client = get_supabase()
-    rows = (
+    query = (
         client.table("triggers_daily")
         .select("*")
         .gte("date", start.isoformat())
@@ -247,22 +301,26 @@ def triggers_recent(days: int = Query(default=30, ge=1, le=90)) -> dict[str, Any
         .eq("mult", d_mult)
         .eq("source", d_source)
         .order("date", desc=True)
-        .execute()
-    ).data or []
-    enriched = enrich_triggers(rows)
+    )
+    query = _filter_by_asset_type(query, scope)
+    rows = enrich_triggers(query.execute().data or []) if query is not None else []
 
     by_date: dict[str, list[dict[str, Any]]] = {}
-    for row in enriched:
+    for row in rows:
         by_date.setdefault(row["date"], []).append(row)
 
-    price_rows = (
+    ids = instrument_ids_for_asset_type(scope)
+    price_query = (
         client.table("market_prices_daily")
         .select("date")
         .lte("date", market_date.isoformat())
         .order("date", desc=True)
         .limit(max(days * 30, 200))
-        .execute()
-    ).data or []
+    )
+    if ids:
+        price_query = price_query.in_("instrument_id", ids)
+    price_rows = price_query.execute().data or []
+
     day_list = []
     seen: set[str] = set()
     for item in price_rows:
@@ -286,6 +344,7 @@ def triggers_recent(days: int = Query(default=30, ge=1, le=90)) -> dict[str, Any
     return {
         "from": day_list[-1]["date"] if day_list else None,
         "to": market_date.isoformat(),
+        "asset_type": scope,
         "days": day_list,
     }
 
@@ -325,32 +384,38 @@ def get_trigger(trigger_id: str) -> dict[str, Any]:
 
 
 @router.get("/api/stats")
-def stats() -> dict[str, Any]:
+def stats(
+    asset_type: str | None = Query(default=None),
+) -> dict[str, Any]:
+    scope = _normalize_asset_type(asset_type) or "STOCK"
     client = get_supabase()
     instruments = (
         client.table("market_instruments")
         .select("id", count="exact")
         .eq("active", True)
+        .eq("asset_type", scope)
         .execute()
     )
-    today = triggers_today()
+    today = triggers_today(asset_type=scope)
+    last = latest_market_date(scope)
     return {
+        "asset_type": scope,
         "stocks": instruments.count or 0,
+        "instruments": instruments.count or 0,
         "today": {
             "date": today["date"],
             "long": len(today["long"]),
             "short": len(today["short"]),
             "stop": len(today["stop"]),
         },
-        "last_market_date": latest_market_date().isoformat()
-        if latest_market_date()
-        else None,
+        "last_market_date": last.isoformat() if last else None,
     }
 
 
 def _long_triggers(
     *,
     instrument_id: str | None = None,
+    asset_type: str | None = "STOCK",
     limit: int = 5000,
 ) -> list[dict[str, Any]]:
     d_length, d_mult, d_source = default_params()
@@ -367,14 +432,31 @@ def _long_triggers(
     )
     if instrument_id:
         query = query.eq("instrument_id", instrument_id)
+    elif asset_type:
+        query = _filter_by_asset_type(query, asset_type.upper())
+        if query is None:
+            return []
     return enrich_triggers(query.execute().data or [])
 
 
 @router.get("/api/stats/long-performance")
-def long_performance_stats() -> dict[str, Any]:
+def long_performance_stats(
+    asset_type: str | None = Query(default=None),
+) -> dict[str, Any]:
     """Min / max / avg % after LONG signals at +5 / +10 / +15 trading days."""
-    rows = _long_triggers()
-    return summarize_long_performance(rows)
+    scope = _normalize_asset_type(asset_type) or "STOCK"
+    rows = _long_triggers(asset_type=scope)
+    summary = summarize_long_performance(rows)
+    summary["asset_type"] = scope
+    return summary
+
+
+@router.get("/api/research/long-performance")
+def research_long_performance(
+    asset_type: str = Query(default="STOCK"),
+) -> dict[str, Any]:
+    """Research stats for a single universe (STOCK or CRYPTO — never mixed)."""
+    return long_performance_stats(asset_type=asset_type)
 
 
 @router.get("/api/stocks/{ticker}/long-stats")
@@ -382,11 +464,12 @@ def stock_long_stats(ticker: str) -> dict[str, Any]:
     inst = get_instrument_by_ticker(ticker)
     if not inst:
         raise HTTPException(status_code=404, detail="Stock not found")
-    rows = _long_triggers(instrument_id=inst["id"])
+    rows = _long_triggers(instrument_id=inst["id"], asset_type=None)
     summary = summarize_long_performance(rows)
     return {
         "ticker": ticker.upper(),
         "name": inst.get("name"),
+        "asset_type": inst.get("asset_type"),
         "trigger_type": summary["trigger_type"],
         "long_count": summary["long_count"],
         "horizons": summary["horizons"],
@@ -394,78 +477,156 @@ def stock_long_stats(ticker: str) -> dict[str, Any]:
     }
 
 
-@router.get("/api/data-status")
-def data_status() -> dict[str, Any]:
+@router.get("/api/crypto/overview")
+def crypto_overview() -> dict[str, Any]:
+    """TOP-N crypto table: price, vortex/trigger, secondary snapshot."""
     client = get_supabase()
     settings = get_settings()
     instruments = (
         client.table("market_instruments")
-        .select("id", count="exact")
+        .select("*")
+        .eq("asset_type", "CRYPTO")
         .eq("active", True)
-        .execute()
-    )
-    with_data = (
-        client.table("market_prices_daily")
-        .select("instrument_id")
+        .order("crypto_rank")
         .execute()
     ).data or []
-    unique_with_data = len({r["instrument_id"] for r in with_data})
 
-    ingestion = latest_pipeline("ingestion")
-    calculation = latest_pipeline("calculation")
-    refresh = latest_pipeline("refresh")
+    d_length, d_mult, d_source = default_params()
+    rows_out: list[dict[str, Any]] = []
+    for inst in instruments:
+        iid = inst["id"]
+        prices = (
+            client.table("market_prices_daily")
+            .select("date,close")
+            .eq("instrument_id", iid)
+            .order("date", desc=True)
+            .limit(2)
+            .execute()
+        ).data or []
+        price = float(prices[0]["close"]) if prices else None
+        prev = float(prices[1]["close"]) if len(prices) > 1 else None
+        change_24h = (
+            (price / prev - 1.0) if price is not None and prev not in (None, 0) else None
+        )
 
-    # Sum API requests from today's ingestion/refresh runs (best-effort)
-    today_iso = date.today().isoformat()
-    runs = (
-        client.table("pipeline_runs")
-        .select("api_requests_used,started_at")
-        .gte("started_at", f"{today_iso}T00:00:00")
-        .execute()
-    ).data or []
-    used_today = sum(int(r.get("api_requests_used") or 0) for r in runs)
+        ind = (
+            client.table("indicator_values_daily")
+            .select("date,basis,upper,lower")
+            .eq("instrument_id", iid)
+            .eq("length", d_length)
+            .eq("mult", d_mult)
+            .eq("source", d_source)
+            .order("date", desc=True)
+            .limit(1)
+            .execute()
+        ).data or []
+        sec = (
+            client.table("secondary_indicator_values_daily")
+            .select("date,rsi14,adx14,relative_volume,ema20,ema50")
+            .eq("instrument_id", iid)
+            .order("date", desc=True)
+            .limit(1)
+            .execute()
+        ).data or []
+        trig = (
+            client.table("triggers_daily")
+            .select("id,date,trigger_type")
+            .eq("instrument_id", iid)
+            .eq("length", d_length)
+            .eq("mult", d_mult)
+            .eq("source", d_source)
+            .order("date", desc=True)
+            .limit(1)
+            .execute()
+        ).data or []
 
+        latest_sec = sec[0] if sec else {}
+        ema20 = latest_sec.get("ema20")
+        ema50 = latest_sec.get("ema50")
+        trend = None
+        if ema20 is not None and ema50 is not None and price is not None:
+            if price > float(ema20) > float(ema50):
+                trend = "Bullish"
+            elif price < float(ema20) < float(ema50):
+                trend = "Bearish"
+            else:
+                trend = "Neutral"
+
+        last_trig = trig[0] if trig else None
+        # Same-day trigger if matches latest price date
+        same_day_trigger = None
+        if last_trig and prices and last_trig["date"] == prices[0]["date"]:
+            same_day_trigger = last_trig["trigger_type"]
+
+        rows_out.append(
+            {
+                "rank": inst.get("crypto_rank"),
+                "ticker": inst["ticker"],
+                "name": inst["name"],
+                "in_top_universe": inst.get("in_top_universe", True),
+                "price": price,
+                "change_24h": change_24h,
+                "vortex": ind[0] if ind else None,
+                "trigger": same_day_trigger,
+                "rsi14": latest_sec.get("rsi14"),
+                "adx14": latest_sec.get("adx14"),
+                "relative_volume": latest_sec.get("relative_volume"),
+                "trend": trend,
+                "last_trigger": last_trig,
+            }
+        )
+
+    status = data_status_for("CRYPTO")
     return {
-        "last_daily_candle": latest_market_date().isoformat()
-        if latest_market_date()
-        else None,
-        "last_ingestion": (ingestion or {}).get("finished_at")
-        or (ingestion or {}).get("started_at"),
-        "last_calculation": (calculation or {}).get("finished_at")
-        or (calculation or {}).get("started_at"),
-        "last_refresh": (refresh or {}).get("finished_at")
-        or (refresh or {}).get("started_at"),
-        "instruments": instruments.count or 0,
-        "instruments_with_data": unique_with_data,
-        "api_requests_used": used_today,
-        "api_requests_limit": 20,
-        "max_requests_per_run": settings.max_eodhd_requests_per_run,
+        "top_n": settings.crypto_top_n,
+        "last_data": status.get("last_daily_candle"),
+        "last_refresh": status.get("last_refresh"),
+        "rows": rows_out,
     }
+
+
+@router.get("/api/data-status")
+def data_status() -> dict[str, Any]:
+    """Backward-compatible STOCK status (+ nested crypto for convenience)."""
+    stocks = data_status_for("STOCK")
+    crypto = data_status_for("CRYPTO")
+    return {
+        **stocks,
+        "stocks": stocks,
+        "crypto": crypto,
+    }
+
+
+@router.get("/api/data-status/stocks")
+def data_status_stocks() -> dict[str, Any]:
+    return data_status_for("STOCK")
+
+
+@router.get("/api/data-status/crypto")
+def data_status_crypto() -> dict[str, Any]:
+    return data_status_for("CRYPTO")
 
 
 @router.post("/api/refresh")
 def refresh_data() -> dict[str, Any]:
-    """Manual refresh: sync market data then recalculate indicators/triggers."""
-    from backend.ingestion.helpers import finish_pipeline_run, start_pipeline_run
-
-    run_id = start_pipeline_run("refresh")
+    """Alias for Refresh Stocks (EODHD only). Kept for compatibility."""
     try:
-        sync_detail = run_sync()
-        calc_detail = calculate_for_all()
-        api_used = int(sync_detail.get("api_requests_used") or 0)
-        detail = {"sync": sync_detail, "calculation": calc_detail}
-        finish_pipeline_run(
-            run_id,
-            status="success",
-            detail=detail,
-            api_requests_used=api_used,
-        )
-        return {"status": "ok", "detail": detail}
+        return refresh_stocks()
     except Exception as exc:
-        finish_pipeline_run(
-            run_id,
-            status="failed",
-            detail={"error": str(exc)},
-            api_requests_used=0,
-        )
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/api/refresh/stocks")
+def refresh_stocks_endpoint() -> dict[str, Any]:
+    try:
+        return refresh_stocks()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/api/refresh/crypto")
+def refresh_crypto_endpoint() -> dict[str, Any]:
+    try:
+        return refresh_crypto()
+    except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

@@ -18,9 +18,12 @@ class InstrumentConfig:
     name: str
     currency: str
     active: bool = True
+    asset_type: str = "STOCK"
 
     def as_row(self) -> dict:
-        return asdict(self)
+        row = asdict(self)
+        row["in_top_universe"] = True
+        return row
 
 
 # Initial universe (~15 names). Symbols are EODHD format: TICKER.EXCHANGE

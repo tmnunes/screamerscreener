@@ -18,7 +18,8 @@ from backend.indicators.secondary_signals import evaluate_secondary_signals
 from backend.indicators.vortex_bands import DEFAULT_LENGTH, DEFAULT_MULT, DEFAULT_SOURCE
 
 TRIGGER_SELECT = (
-    "*, market_instruments(ticker,name,exchange,country,currency), "
+    "*, market_instruments(ticker,name,exchange,country,currency,asset_type,"
+    "api_symbol,crypto_rank,market_cap,in_top_universe), "
     "trigger_performance(*)"
 )
 
@@ -27,27 +28,42 @@ def default_params() -> tuple[int, float, str]:
     return DEFAULT_LENGTH, DEFAULT_MULT, DEFAULT_SOURCE
 
 
-def get_instrument_by_ticker(ticker: str) -> dict[str, Any] | None:
+def get_instrument_by_ticker(
+    ticker: str, *, asset_type: str | None = None
+) -> dict[str, Any] | None:
     client = get_supabase()
-    rows = (
+    query = (
         client.table("market_instruments")
         .select("*")
         .eq("ticker", ticker.upper())
-        .limit(1)
-        .execute()
-    ).data or []
+    )
+    if asset_type:
+        query = query.eq("asset_type", asset_type.upper())
+    rows = query.limit(1).execute().data or []
     return rows[0] if rows else None
 
 
-def latest_market_date() -> date | None:
+def instrument_ids_for_asset_type(asset_type: str) -> list[str]:
     client = get_supabase()
     rows = (
-        client.table("market_prices_daily")
-        .select("date")
-        .order("date", desc=True)
-        .limit(1)
+        client.table("market_instruments")
+        .select("id")
+        .eq("asset_type", asset_type.upper())
         .execute()
     ).data or []
+    return [r["id"] for r in rows]
+
+
+def latest_market_date(asset_type: str | None = None) -> date | None:
+    """Latest candle date. Optionally scoped to STOCK or CRYPTO instruments."""
+    client = get_supabase()
+    query = client.table("market_prices_daily").select("date")
+    if asset_type:
+        ids = instrument_ids_for_asset_type(asset_type)
+        if not ids:
+            return None
+        query = query.in_("instrument_id", ids)
+    rows = query.order("date", desc=True).limit(1).execute().data or []
     if not rows:
         return None
     return date.fromisoformat(rows[0]["date"])
@@ -86,6 +102,9 @@ def flatten_trigger_row(row: dict[str, Any]) -> dict[str, Any]:
         "exchange": inst.get("exchange"),
         "country": inst.get("country"),
         "currency": inst.get("currency"),
+        "asset_type": inst.get("asset_type") or row.get("asset_type"),
+        "api_symbol": inst.get("api_symbol"),
+        "crypto_rank": inst.get("crypto_rank"),
         "performance": perf,
     }
 
@@ -132,17 +151,37 @@ def _fetch_regime_map(dates: list[str]) -> dict[str, dict[str, Any]]:
     return {r["date"]: r for r in rows}
 
 
+def _fetch_crypto_regime_map(dates: list[str]) -> dict[str, dict[str, Any]]:
+    if not dates:
+        return {}
+    client = get_supabase()
+    rows = (
+        client.table("crypto_market_regime_daily")
+        .select("*")
+        .in_("date", dates)
+        .execute()
+    ).data or []
+    return {r["date"]: r for r in rows}
+
+
 def _attach_secondary_signals(
     trigger: dict[str, Any],
     secondary_map: dict[tuple[str, str], dict[str, Any]],
-    regime_map: dict[str, dict[str, Any]],
+    stock_regime_map: dict[str, dict[str, Any]],
+    crypto_regime_map: dict[str, dict[str, Any]],
 ) -> None:
     key = (trigger["instrument_id"], trigger["date"])
+    asset = (trigger.get("asset_type") or "STOCK").upper()
+    regime = (
+        crypto_regime_map.get(trigger["date"])
+        if asset == "CRYPTO"
+        else stock_regime_map.get(trigger["date"])
+    )
     summary = evaluate_secondary_signals(
         trigger_type=trigger["trigger_type"],
         trigger_price=float(trigger["trigger_price"]),
         secondary_row=secondary_map.get(key),
-        market_regime=regime_map.get(trigger["date"]),
+        market_regime=regime,
     )
     trigger["secondary_signals"] = summary.as_dict() if summary else None
 
@@ -209,7 +248,10 @@ def enrich_triggers(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         # Fallback if nested embed is unavailable
         instruments = (
             client.table("market_instruments")
-            .select("id,ticker,name,exchange,country,currency")
+            .select(
+                "id,ticker,name,exchange,country,currency,asset_type,"
+                "api_symbol,crypto_rank"
+            )
             .execute()
         ).data or []
         inst_by_id = {i["id"]: i for i in instruments}
@@ -231,15 +273,22 @@ def enrich_triggers(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "exchange": inst.get("exchange"),
                     "country": inst.get("country"),
                     "currency": inst.get("currency"),
+                    "asset_type": inst.get("asset_type"),
+                    "api_symbol": inst.get("api_symbol"),
+                    "crypto_rank": inst.get("crypto_rank"),
                     "performance": perf_by_id.get(row["id"]),
                 }
             )
 
     _refresh_performance(flat_rows)
     secondary_map = _fetch_secondary_map(flat_rows)
-    regime_map = _fetch_regime_map(list({t["date"] for t in flat_rows}))
+    dates = list({t["date"] for t in flat_rows})
+    stock_regime_map = _fetch_regime_map(dates)
+    crypto_regime_map = _fetch_crypto_regime_map(dates)
     for item in flat_rows:
-        _attach_secondary_signals(item, secondary_map, regime_map)
+        _attach_secondary_signals(
+            item, secondary_map, stock_regime_map, crypto_regime_map
+        )
     by_id = {item["id"]: item for item in flat_rows}
     return [by_id.get(r["id"], {**r, "performance": None}) for r in rows]
 
@@ -286,8 +335,11 @@ def get_trigger_by_id(trigger_id: str) -> dict[str, Any] | None:
     _refresh_performance([flat], force=True)
     _attach_performance_meta(flat, prices)
     secondary_map = _fetch_secondary_map([flat])
-    regime_map = _fetch_regime_map([flat["date"]])
-    _attach_secondary_signals(flat, secondary_map, regime_map)
+    stock_regime_map = _fetch_regime_map([flat["date"]])
+    crypto_regime_map = _fetch_crypto_regime_map([flat["date"]])
+    _attach_secondary_signals(
+        flat, secondary_map, stock_regime_map, crypto_regime_map
+    )
     return flat
 
 

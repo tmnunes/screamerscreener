@@ -204,12 +204,15 @@ def calculate_for_all(
     length: int = DEFAULT_LENGTH,
     mult: float = DEFAULT_MULT,
     source: str = DEFAULT_SOURCE,
+    asset_type: str = "STOCK",
 ) -> dict[str, Any]:
-    run_id = start_pipeline_run("calculation")
+    asset = asset_type.upper()
+    run_type = "calculation_crypto" if asset == "CRYPTO" else "calculation"
+    run_id = start_pipeline_run(run_type)
     per_ticker: dict[str, Any] = {}
 
     try:
-        instruments = list_active_instruments()
+        instruments = list_active_instruments(asset_type=asset)
         for inst in instruments:
             ticker = inst["ticker"]
             prices = _fetch_prices(inst["id"])
@@ -241,14 +244,22 @@ def calculate_for_all(
                 f"secondary={n_sec} triggers={len(triggers)} perf={n_perf}"
             )
 
-        regime_rows = upsert_market_regime()
+        if asset == "CRYPTO":
+            from backend.indicators.crypto_regime import upsert_crypto_market_regime
+
+            regime_rows = upsert_crypto_market_regime()
+            regime_key = "crypto_market_regime_rows"
+        else:
+            regime_rows = upsert_market_regime()
+            regime_key = "market_regime_rows"
 
         detail = {
             "length": length,
             "mult": mult,
             "source": source,
+            "asset_type": asset,
             "per_ticker": per_ticker,
-            "market_regime_rows": regime_rows,
+            regime_key: regime_rows,
         }
         finish_pipeline_run(
             run_id, status="success", detail=detail, api_requests_used=0
@@ -258,7 +269,7 @@ def calculate_for_all(
         finish_pipeline_run(
             run_id,
             status="failed",
-            detail={"error": str(exc), "per_ticker": per_ticker},
+            detail={"error": str(exc), "per_ticker": per_ticker, "asset_type": asset},
             api_requests_used=0,
         )
         raise
@@ -270,10 +281,22 @@ def main() -> None:
     parser.add_argument("--length", type=int, default=DEFAULT_LENGTH)
     parser.add_argument("--mult", type=float, default=DEFAULT_MULT)
     parser.add_argument("--source", type=str, default=DEFAULT_SOURCE)
+    parser.add_argument(
+        "--asset-type",
+        type=str,
+        default="STOCK",
+        choices=["STOCK", "CRYPTO"],
+        help="Universe to calculate (default STOCK)",
+    )
     args = parser.parse_args()
 
     try:
-        calculate_for_all(length=args.length, mult=args.mult, source=args.source)
+        calculate_for_all(
+            length=args.length,
+            mult=args.mult,
+            source=args.source,
+            asset_type=args.asset_type,
+        )
         print("Calculation completed")
     except Exception as exc:
         logger.error("%s", exc)

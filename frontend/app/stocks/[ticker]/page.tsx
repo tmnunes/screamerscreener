@@ -56,7 +56,7 @@ export default async function StockPage({
 
   return (
     <>
-      <SiteHeader />
+      <SiteHeader active="stocks" />
       <main className="mx-auto w-full max-w-6xl px-6 py-8">
         <Link href="/dashboard" className="text-sm text-[var(--muted)] hover:underline">
           ← Dashboard

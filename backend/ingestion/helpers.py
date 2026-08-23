@@ -11,16 +11,45 @@ from backend.db import get_supabase
 logger = logging.getLogger(__name__)
 
 
-def list_active_instruments() -> list[dict[str, Any]]:
+def list_active_instruments(
+    asset_type: str | None = "STOCK",
+) -> list[dict[str, Any]]:
+    """List active instruments.
+
+    asset_type:
+      - "STOCK" (default) — stocks only (preserves legacy behaviour)
+      - "CRYPTO" — crypto only
+      - None — all active instruments (avoid in refresh pipelines)
+    """
     client = get_supabase()
-    result = (
+    query = (
         client.table("market_instruments")
         .select("*")
         .eq("active", True)
         .order("ticker")
-        .execute()
     )
+    if asset_type is not None:
+        query = query.eq("asset_type", asset_type.upper())
+    result = query.execute()
     return list(result.data or [])
+
+
+def list_instruments_by_type(
+    asset_type: str,
+    *,
+    active_only: bool = True,
+) -> list[dict[str, Any]]:
+    client = get_supabase()
+    query = (
+        client.table("market_instruments")
+        .select("*")
+        .eq("asset_type", asset_type.upper())
+        .order("crypto_rank")
+        .order("ticker")
+    )
+    if active_only:
+        query = query.eq("active", True)
+    return list(query.execute().data or [])
 
 
 def last_daily_date(instrument_id: str) -> date | None:

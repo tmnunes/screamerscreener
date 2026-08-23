@@ -1,10 +1,12 @@
 import { SiteHeader } from "@/components/site-header";
 import { TriggerCard } from "@/components/trigger-card";
 import { RecentTimeline } from "@/components/recent-timeline";
-import { RefreshButton } from "@/components/refresh-button";
+import { RefreshStocksButton } from "@/components/refresh-button";
 import { LongStatsPanel } from "@/components/long-stats-panel";
+import { UniverseTabs } from "@/components/universe-tabs";
+import { MarketDataPanel } from "@/components/market-data-panel";
 import {
-  fetchDataStatus,
+  fetchDataStatusStocks,
   fetchLongPerformanceStats,
   fetchRecent,
   fetchStats,
@@ -23,11 +25,11 @@ export default async function DashboardPage() {
 
   try {
     [today, recent, stats, status, longStats] = await Promise.all([
-      fetchToday(),
-      fetchRecent(30),
-      fetchStats(),
-      fetchDataStatus(),
-      fetchLongPerformanceStats(),
+      fetchToday("STOCK"),
+      fetchRecent(30, "STOCK"),
+      fetchStats("STOCK"),
+      fetchDataStatusStocks(),
+      fetchLongPerformanceStats("STOCK"),
     ]);
   } catch (err) {
     error = err instanceof Error ? err.message : "Failed to load dashboard data";
@@ -35,23 +37,27 @@ export default async function DashboardPage() {
 
   return (
     <>
-      <SiteHeader />
+      <SiteHeader active="stocks" />
       <main className="mx-auto w-full max-w-6xl px-6 py-8">
-        <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
+            <h1 className="text-3xl font-semibold tracking-tight">
+              Stocks screener
+            </h1>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              Daily triggers · Length 47 · Mult 1.6 · HLC3
+              Daily triggers · Length 47 · Mult 1.6 · HLC3 · EODHD
             </p>
           </div>
-          <RefreshButton />
+          <RefreshStocksButton />
         </div>
+
+        <UniverseTabs active="stocks" />
 
         {error ? (
           <div className="rounded border border-[var(--line)] bg-white p-4 text-sm text-[var(--short)]">
             {error}
             <p className="mt-2 text-[var(--muted)]">
-              Ensure the API is running on NEXT_PUBLIC_API_URL and migrations are applied.
+              Ensure the API is running and migration 5 (asset_type) is applied.
             </p>
           </div>
         ) : (
@@ -82,41 +88,15 @@ export default async function DashboardPage() {
             <RecentTimeline days={recent?.days ?? []} />
 
             <section className="mt-12 border-t border-[var(--line)] pt-8">
-              <LongStatsPanel data={longStats} showByStock />
+              <LongStatsPanel data={longStats} showByStock title="LONG performance · Stocks" />
             </section>
 
             <section className="mt-12 border-t border-[var(--line)] pt-8">
-              <h2 className="mb-4 text-sm font-semibold tracking-[0.15em] text-[var(--muted)]">
-                DATA STATUS
-              </h2>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 text-sm">
-                <StatusRow label="Last daily candle" value={status?.last_daily_candle ?? "—"} />
-                <StatusRow
-                  label="Last ingestion"
-                  value={
-                    status?.last_ingestion
-                      ? new Date(status.last_ingestion).toLocaleString()
-                      : "—"
-                  }
-                />
-                <StatusRow
-                  label="Last calculation"
-                  value={
-                    status?.last_calculation
-                      ? new Date(status.last_calculation).toLocaleString()
-                      : "—"
-                  }
-                />
-                <StatusRow label="Instruments" value={String(status?.instruments ?? 0)} />
-                <StatusRow
-                  label="Instruments with data"
-                  value={String(status?.instruments_with_data ?? 0)}
-                />
-                <StatusRow
-                  label="API requests used"
-                  value={`${status?.api_requests_used ?? 0} / ${status?.api_requests_limit ?? 20}`}
-                />
-              </div>
+              <MarketDataPanel
+                title="MARKET DATA · STOCKS"
+                status={status}
+                refreshSlot={<RefreshStocksButton />}
+              />
             </section>
           </>
         )}
@@ -134,15 +114,6 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function StatusRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex justify-between gap-3 border-b border-[var(--line)] py-2">
-      <span className="text-[var(--muted)]">{label}</span>
-      <span className="font-mono text-right">{value}</span>
-    </div>
-  );
-}
-
 function TriggerColumn({
   title,
   color,
@@ -154,8 +125,14 @@ function TriggerColumn({
 }) {
   return (
     <div>
-      <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold tracking-[0.12em]" style={{ color }}>
-        <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: color }} />
+      <h2
+        className="mb-3 flex items-center gap-2 text-sm font-semibold tracking-[0.12em]"
+        style={{ color }}
+      >
+        <span
+          className="inline-block h-2.5 w-2.5 rounded-full"
+          style={{ background: color }}
+        />
         {title}
       </h2>
       <div className="rounded border border-[var(--line)] bg-white px-4">
