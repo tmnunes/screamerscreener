@@ -1,0 +1,10 @@
+# Supabase SQL migrations live here.
+# Phase 2 will add:
+#   - market_instruments
+#   - market_prices_daily
+#   - market_prices_hourly (schema only, no data yet)
+#   - indicator_values_daily
+#   - triggers_daily
+#   - trigger_performance
+#
+# Apply via the Supabase SQL editor or CLI — details in Phase 2.
