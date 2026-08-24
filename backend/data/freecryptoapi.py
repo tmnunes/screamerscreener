@@ -73,6 +73,7 @@ class FreeCryptoAPIProvider(MarketDataProvider):
         )
         self.timeout = timeout
         self.requests_used = 0
+        self._ohlc_plan_blocked = False
 
         if not self.api_key:
             raise RuntimeError(
@@ -112,7 +113,12 @@ class FreeCryptoAPIProvider(MarketDataProvider):
                 except Exception:
                     message = response.text
                 raise FreeCryptoAPIError(response.status_code, str(message))
-            return response.json()
+            body = response.json()
+            # FreeCryptoAPI often returns HTTP 200 with status=false on plan limits
+            if isinstance(body, dict) and body.get("status") in (False, "false", "error"):
+                message = str(body.get("error") or body.get("message") or "API error")
+                raise FreeCryptoAPIError(403, message)
+            return body
 
     def get_daily_data(
         self,
@@ -121,21 +127,56 @@ class FreeCryptoAPIProvider(MarketDataProvider):
         from_date: date | None = None,
         to_date: date | None = None,
     ) -> list[dict[str, Any]]:
-        today = to_date or date.today()
-        if from_date is not None:
-            raw = self._get(
-                "/getOHLC",
-                {
-                    "symbol": symbol,
-                    "start_date": from_date.isoformat(),
-                    "end_date": today.isoformat(),
-                },
-            )
-        else:
-            days = get_settings().crypto_history_days
-            raw = self._get("/getOHLC", {"symbol": symbol, "days": days})
+        """Prefer FreeCryptoAPI /getOHLC; fall back to Binance public daily klines.
 
-        candles = parse_ohlc_payload(raw)
+        Free tiers frequently block historical endpoints while still allowing
+        /getData. Binance fallback keeps Vortex/triggers usable without mixing
+        stock EODHD traffic.
+        """
+        today = to_date or date.today()
+        candles: list[dict[str, Any]] = []
+        plan_blocked = self._ohlc_plan_blocked
+        if not self._ohlc_plan_blocked:
+            try:
+                if from_date is not None:
+                    raw = self._get(
+                        "/getOHLC",
+                        {
+                            "symbol": symbol,
+                            "start_date": from_date.isoformat(),
+                            "end_date": today.isoformat(),
+                        },
+                    )
+                else:
+                    days = get_settings().crypto_history_days
+                    raw = self._get("/getOHLC", {"symbol": symbol, "days": days})
+                candles = parse_ohlc_payload(raw)
+            except FreeCryptoAPIError as exc:
+                msg = (exc.message or "").lower()
+                if "upgrade" in msg or "plan" in msg or "historical" in msg or "no access" in msg:
+                    self._ohlc_plan_blocked = True
+                    plan_blocked = True
+                logger.warning(
+                    "FreeCryptoAPI OHLC unavailable for %s (%s) — trying Binance daily fallback",
+                    symbol,
+                    exc.message,
+                )
+
+        if not candles:
+            from backend.data.binance_ohlc import fetch_binance_daily
+
+            start = from_date or self.default_history_from_date()
+            candles = fetch_binance_daily(
+                symbol, from_date=start, to_date=today, timeout=self.timeout
+            )
+            if candles:
+                logger.info(
+                    "Binance fallback filled %s candles for %s%s",
+                    len(candles),
+                    symbol,
+                    " (FreeCryptoAPI plan blocked history)" if plan_blocked else "",
+                )
+
         if from_date is not None:
             candles = [
                 c
@@ -156,6 +197,27 @@ class FreeCryptoAPIProvider(MarketDataProvider):
         quotes = parse_quote_payload(raw)
         return quotes[0] if quotes else None
 
+    def get_latest_many(self, symbols: list[str]) -> dict[str, dict[str, Any]]:
+        """Batch live quotes via /getData (BTC+ETH+...)."""
+        if not symbols:
+            return {}
+        out: dict[str, dict[str, Any]] = {}
+        # FreeCryptoAPI accepts + joined symbols
+        chunk_size = 10
+        for i in range(0, len(symbols), chunk_size):
+            chunk = symbols[i : i + chunk_size]
+            joined = "+".join(chunk)
+            try:
+                raw = self._get("/getData", {"symbol": joined})
+            except FreeCryptoAPIError as exc:
+                logger.warning("getData batch failed: %s", exc.message)
+                continue
+            for q in parse_quote_payload(raw):
+                sym = q.get("symbol")
+                if sym:
+                    out[str(sym).upper()] = q
+        return out
+
     def get_hourly_data(
         self,
         symbol: str,
@@ -168,8 +230,14 @@ class FreeCryptoAPIProvider(MarketDataProvider):
         )
 
     def get_top(self, n: int) -> list[dict[str, Any]]:
-        raw = self._get("/getTop", {"top": n})
-        return parse_top_payload(raw)
+        try:
+            raw = self._get("/getTop", {"top": n})
+            ranked = parse_top_payload(raw)
+            if ranked:
+                return ranked
+        except FreeCryptoAPIError as exc:
+            logger.warning("getTop unavailable (%s) — caller should use fallback list", exc.message)
+        return []
 
     def default_history_from_date(self) -> date:
         return date.today() - timedelta(days=get_settings().crypto_history_days)
@@ -284,11 +352,20 @@ def parse_quote_payload(payload: Any) -> list[dict[str, Any]]:
             continue
         symbol = _pick(item, "symbol", "ticker", "coin", "code", "name")
         price = _to_float(
-            _pick(item, "price", "price_usd", "last", "close", "rate", "usd")
+            _pick(
+                item,
+                "last",
+                "price",
+                "price_usd",
+                "close",
+                "rate",
+                "usd",
+            )
         )
         change_24h = _to_float(
             _pick(
                 item,
+                "daily_change_percentage",
                 "change_24h",
                 "change24h",
                 "percent_change_24h",
@@ -297,6 +374,8 @@ def parse_quote_payload(payload: Any) -> list[dict[str, Any]]:
                 "price_change_percentage_24h",
             )
         )
+        # FreeCryptoAPI getData returns ratio (0.007 = +0.7%), not percent points
+        # Only scale when clearly already percent-like (> ~1.5 absolute)
         if change_24h is not None and abs(change_24h) > 1.5:
             change_24h = change_24h / 100.0
         market_cap = _to_float(

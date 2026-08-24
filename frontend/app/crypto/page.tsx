@@ -103,6 +103,9 @@ export default async function CryptoPage() {
               <h2 className="mb-3 text-sm font-semibold tracking-[0.15em] text-[var(--muted)]">
                 TOP {overview?.top_n ?? 25}
               </h2>
+              {overview?.note ? (
+                <p className="mb-3 text-xs text-[var(--short)]">{overview.note}</p>
+              ) : null}
               <div className="overflow-x-auto rounded border border-[var(--line)] bg-white">
                 <table className="w-full min-w-[720px] text-left text-sm">
                   <thead className="border-b border-[var(--line)] text-[10px] uppercase tracking-wide text-[var(--muted)]">

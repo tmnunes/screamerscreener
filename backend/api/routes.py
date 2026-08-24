@@ -491,10 +491,26 @@ def crypto_overview() -> dict[str, Any]:
         .execute()
     ).data or []
 
+    live_quotes: dict[str, dict[str, Any]] = {}
+    provider_note = None
+    if settings.freecryptoapi_api_key and instruments:
+        try:
+            from backend.data.freecryptoapi import FreeCryptoAPIProvider
+
+            provider = FreeCryptoAPIProvider(max_requests=5)
+            symbols = [
+                (inst.get("api_symbol") or inst["ticker"]) for inst in instruments
+            ]
+            live_quotes = provider.get_latest_many(symbols)
+        except Exception as exc:
+            provider_note = str(exc)
+
     d_length, d_mult, d_source = default_params()
     rows_out: list[dict[str, Any]] = []
     for inst in instruments:
         iid = inst["id"]
+        ticker = inst["ticker"]
+        api_symbol = (inst.get("api_symbol") or ticker).upper()
         prices = (
             client.table("market_prices_daily")
             .select("date,close")
@@ -508,6 +524,12 @@ def crypto_overview() -> dict[str, Any]:
         change_24h = (
             (price / prev - 1.0) if price is not None and prev not in (None, 0) else None
         )
+        live = live_quotes.get(api_symbol) or live_quotes.get(ticker.upper())
+        if live:
+            if live.get("price") is not None:
+                price = float(live["price"])
+            if live.get("change_24h") is not None:
+                change_24h = float(live["change_24h"])
 
         ind = (
             client.table("indicator_values_daily")
@@ -577,11 +599,22 @@ def crypto_overview() -> dict[str, Any]:
         )
 
     status = data_status_for("CRYPTO")
+    instruments_with_prices = status.get("instruments_with_data") or 0
+    note = provider_note
+    if instruments_with_prices == 0:
+        note = (
+            (note + " · " if note else "")
+            + "No daily candles yet. FreeCryptoAPI free plan blocks /getOHLC — "
+            "run: python -m backend.ingestion.initial_load_crypto "
+            "(uses Binance public daily as OHLC fallback)."
+        )
     return {
         "top_n": settings.crypto_top_n,
         "last_data": status.get("last_daily_candle"),
         "last_refresh": status.get("last_refresh"),
         "rows": rows_out,
+        "note": note,
+        "live_quotes": len(live_quotes),
     }
 
 

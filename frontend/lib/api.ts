@@ -179,6 +179,8 @@ export const fetchCryptoOverview = () =>
     last_data: string | null;
     last_refresh: string | null;
     rows: CryptoOverviewRow[];
+    note?: string | null;
+    live_quotes?: number;
   }>("/api/crypto/overview");
 
 export const fetchStock = (ticker: string) =>
