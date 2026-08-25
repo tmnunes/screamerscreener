@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_URL = process.env.API_URL ?? "http://localhost:8000";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
@@ -222,14 +222,23 @@ export const fetchStockTriggers = (ticker: string) =>
 
 export const fetchTrigger = (id: string) => api<Trigger>(`/api/triggers/${id}`);
 
-export const refreshData = () =>
-  api<{ status: string }>("/api/refresh", { method: "POST" });
+export const refreshData = async () => {
+  const res = await fetch("/api/backend/refresh", { method: "POST" });
+  if (!res.ok) throw new Error((await res.text()) || `Request failed: ${res.status}`);
+  return res.json() as Promise<{ status: string }>;
+};
 
-export const refreshStocks = () =>
-  api<{ status: string }>("/api/refresh/stocks", { method: "POST" });
+export const refreshStocks = async () => {
+  const res = await fetch("/api/backend/refresh/stocks", { method: "POST" });
+  if (!res.ok) throw new Error((await res.text()) || `Request failed: ${res.status}`);
+  return res.json() as Promise<{ status: string }>;
+};
 
-export const refreshCrypto = () =>
-  api<{ status: string }>("/api/refresh/crypto", { method: "POST" });
+export const refreshCrypto = async () => {
+  const res = await fetch("/api/backend/refresh/crypto", { method: "POST" });
+  if (!res.ok) throw new Error((await res.text()) || `Request failed: ${res.status}`);
+  return res.json() as Promise<{ status: string }>;
+};
 
 export function formatPrice(value: number, currency?: string) {
   const prefix = currency === "EUR" ? "€" : currency === "USD" ? "$" : "";

@@ -22,13 +22,14 @@ Fill at least:
 - `EODHD_API_KEY` (**required** for ingestion — currently empty in your `.env`)
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
-- `NEXT_PUBLIC_API_URL=http://localhost:8000`
+- `API_URL=http://localhost:8000` (Next.js server → FastAPI; not exposed to the browser)
+
 
 Frontend public env:
 
 ```bash
 cp frontend/.env.example frontend/.env.local
-# set NEXT_PUBLIC_API_URL=http://localhost:8000
+# set API_URL=http://localhost:8000
 ```
 
 ### 2. Apply database migrations (Phase 2–3)
