@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend.api.deps import (
     default_params,
@@ -20,6 +20,7 @@ from backend.api.asset_pipelines import (
     refresh_crypto,
     refresh_stocks,
 )
+from backend.api.cron_auth import require_cron_secret
 from backend.backtest.long_stats import summarize_long_performance
 from backend.config import get_settings
 from backend.db import get_supabase
@@ -641,7 +642,7 @@ def data_status_crypto() -> dict[str, Any]:
 
 
 @router.post("/api/refresh")
-def refresh_data() -> dict[str, Any]:
+def refresh_data(_: None = Depends(require_cron_secret)) -> dict[str, Any]:
     """Alias for Refresh Stocks (EODHD only). Kept for compatibility."""
     try:
         return refresh_stocks()
@@ -650,7 +651,7 @@ def refresh_data() -> dict[str, Any]:
 
 
 @router.post("/api/refresh/stocks")
-def refresh_stocks_endpoint() -> dict[str, Any]:
+def refresh_stocks_endpoint(_: None = Depends(require_cron_secret)) -> dict[str, Any]:
     try:
         return refresh_stocks()
     except Exception as exc:
@@ -658,7 +659,7 @@ def refresh_stocks_endpoint() -> dict[str, Any]:
 
 
 @router.post("/api/refresh/crypto")
-def refresh_crypto_endpoint() -> dict[str, Any]:
+def refresh_crypto_endpoint(_: None = Depends(require_cron_secret)) -> dict[str, Any]:
     try:
         return refresh_crypto()
     except Exception as exc:

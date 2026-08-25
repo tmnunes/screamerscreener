@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     vortex_mult: float = 1.6
     vortex_source: str = "hlc3"
 
+    # Optional. If set, POST /api/refresh* require header X-Cron-Secret.
+    cron_secret: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

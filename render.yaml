@@ -1,5 +1,6 @@
-# Render Blueprint — backend only
-# https://render.com/docs/blueprint-spec
+# Render Blueprint — web API + nightly cron jobs
+# Cron jobs typically need a paid Render plan.
+# https://render.com/docs/cronjobs
 
 services:
   - type: web
@@ -33,3 +34,86 @@ services:
         value: "hlc3"
       - key: ALLOWED_ORIGINS
         sync: false
+      - key: CRON_SECRET
+        sync: false
+
+  # 00:00 UTC — change schedule if you want Lisbon local midnight
+  - type: cron
+    name: screamerscreener-refresh-stocks
+    runtime: python
+    schedule: "0 0 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m backend.jobs.nightly_refresh stocks
+    envVars:
+      - fromService:
+          name: screamerscreener-api
+          type: web
+          envVarKey: EODHD_API_KEY
+      - fromService:
+          name: screamerscreener-api
+          type: web
+          envVarKey: MAX_EODHD_REQUESTS_PER_RUN
+      - fromService:
+          name: screamerscreener-api
+          type: web
+          envVarKey: SUPABASE_URL
+      - fromService:
+          name: screamerscreener-api
+          type: web
+          envVarKey: SUPABASE_SERVICE_ROLE_KEY
+      - fromService:
+          name: screamerscreener-api
+          type: web
+          envVarKey: VORTEX_LENGTH
+      - fromService:
+          name: screamerscreener-api
+          type: web
+          envVarKey: VORTEX_MULT
+      - fromService:
+          name: screamerscreener-api
+          type: web
+          envVarKey: VORTEX_SOURCE
+
+  - type: cron
+    name: screamerscreener-refresh-crypto
+    runtime: python
+    schedule: "15 0 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m backend.jobs.nightly_refresh crypto
+    envVars:
+      - fromService:
+          name: screamerscreener-api
+          type: web
+          envVarKey: FREECRYPTOAPI_API_KEY
+      - fromService:
+          name: screamerscreener-api
+          type: web
+          envVarKey: MAX_FREECRYPTOAPI_REQUESTS_PER_RUN
+      - fromService:
+          name: screamerscreener-api
+          type: web
+          envVarKey: CRYPTO_TOP_N
+      - fromService:
+          name: screamerscreener-api
+          type: web
+          envVarKey: CRYPTO_HISTORY_DAYS
+      - fromService:
+          name: screamerscreener-api
+          type: web
+          envVarKey: SUPABASE_URL
+      - fromService:
+          name: screamerscreener-api
+          type: web
+          envVarKey: SUPABASE_SERVICE_ROLE_KEY
+      - fromService:
+          name: screamerscreener-api
+          type: web
+          envVarKey: VORTEX_LENGTH
+      - fromService:
+          name: screamerscreener-api
+          type: web
+          envVarKey: VORTEX_MULT
+      - fromService:
+          name: screamerscreener-api
+          type: web
+          envVarKey: VORTEX_SOURCE

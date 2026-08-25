@@ -1,0 +1,53 @@
+# Nightly refresh — 00:00 Europe/Lisbon (GitHub Actions cron is UTC;
+# 23:00 UTC ≈ midnight Lisbon in summer / 00:00 UTC in winter — adjust if needed).
+#
+# Required repo secrets:
+#   API_URL      — https://your-api.onrender.com
+#   CRON_SECRET  — same value as Render CRON_SECRET
+
+name: Nightly refresh
+
+on:
+  schedule:
+    # 00:00 Lisbon (WEST, UTC+1) ≈ 23:00 UTC
+    - cron: "0 23 * * *"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "stocks | crypto | all"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - stocks
+          - crypto
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Refresh stocks
+        if: ${{ github.event_name == 'schedule' || inputs.target == 'all' || inputs.target == 'stocks' }}
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST "${API_URL}/api/refresh/stocks" \
+            -H "Content-Type: application/json" \
+            -H "X-Cron-Secret: ${CRON_SECRET}" \
+            --max-time 1500
+
+      - name: Refresh crypto
+        if: ${{ github.event_name == 'schedule' || inputs.target == 'all' || inputs.target == 'crypto' }}
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST "${API_URL}/api/refresh/crypto" \
+            -H "Content-Type: application/json" \
+            -H "X-Cron-Secret: ${CRON_SECRET}" \
+            --max-time 1500
