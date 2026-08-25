@@ -1,0 +1,35 @@
+# Render Blueprint — backend only
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: screamerscreener-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: EODHD_API_KEY
+        sync: false
+      - key: MAX_EODHD_REQUESTS_PER_RUN
+        value: "18"
+      - key: FREECRYPTOAPI_API_KEY
+        sync: false
+      - key: MAX_FREECRYPTOAPI_REQUESTS_PER_RUN
+        value: "40"
+      - key: CRYPTO_TOP_N
+        value: "25"
+      - key: CRYPTO_HISTORY_DAYS
+        value: "730"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: VORTEX_LENGTH
+        value: "47"
+      - key: VORTEX_MULT
+        value: "1.6"
+      - key: VORTEX_SOURCE
+        value: "hlc3"
+      - key: ALLOWED_ORIGINS
+        sync: false
