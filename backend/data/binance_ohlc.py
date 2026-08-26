@@ -3,7 +3,9 @@
 No API key required. Used only for CRYPTO historical candles so Vortex/triggers
 can run on free FreeCryptoAPI tiers that allow /getData but not /getOHLC.
 
-Endpoint: GET https://api.binance.com/api/v3/klines
+Primary endpoint: https://data-api.binance.vision/api/v3/klines
+(``api.binance.com`` returns HTTP 451 from many cloud regions.)
+
 Interval: 1d (UTC day boundary — matches Binance candle open time in UTC).
 
 Pair mapping: SYMBOL -> SYMBOLUSDT (stablecoins / missing pairs return []).
@@ -19,7 +21,17 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-BINANCE_KLINES = "https://api.binance.com/api/v3/klines"
+# Prefer the public market-data host; api.binance.com is geo-blocked (451) on
+# common US cloud egress (Render, GitHub-hosted runners calling Render, etc.).
+BINANCE_KLINES_URLS = (
+    "https://data-api.binance.vision/api/v3/klines",
+    "https://api.binance.us/api/v3/klines",
+    "https://api.binance.com/api/v3/klines",
+)
+BINANCE_KLINES = BINANCE_KLINES_URLS[0]
+
+# Soft-fail statuses: pair missing, geo-restriction, or forbidden — never abort refresh.
+_SOFT_FAIL_STATUSES = {400, 403, 451}
 
 # Symbols that are not useful as USDT spot pairs for this screener
 _SKIP = {"USDT", "USDC", "DAI", "FDUSD", "TUSD", "BUSD"}
@@ -57,14 +69,42 @@ def fetch_binance_daily(
         end = datetime(to_date.year, to_date.month, to_date.day, 23, 59, 59, tzinfo=timezone.utc)
         params["endTime"] = int(end.timestamp() * 1000)
 
-    logger.info("Binance klines %s params=%s", pair, {k: v for k, v in params.items() if k != "symbol"})
+    logger.info(
+        "Binance klines %s params=%s",
+        pair,
+        {k: v for k, v in params.items() if k != "symbol"},
+    )
+
+    raw: Any = None
+    last_error: str | None = None
     with httpx.Client(timeout=timeout) as client:
-        response = client.get(BINANCE_KLINES, params=params)
-        if response.status_code == 400:
-            logger.warning("Binance pair unavailable for %s: %s", pair, response.text[:200])
-            return []
-        response.raise_for_status()
-        raw = response.json()
+        for url in BINANCE_KLINES_URLS:
+            response = client.get(url, params=params)
+            if response.status_code in _SOFT_FAIL_STATUSES:
+                last_error = f"HTTP {response.status_code}: {response.text[:200]}"
+                logger.warning(
+                    "Binance soft-fail for %s via %s — %s",
+                    pair,
+                    url,
+                    last_error,
+                )
+                continue
+            if not response.is_success:
+                last_error = f"HTTP {response.status_code}: {response.text[:200]}"
+                logger.warning(
+                    "Binance error for %s via %s — %s",
+                    pair,
+                    url,
+                    last_error,
+                )
+                continue
+            raw = response.json()
+            break
+
+    if raw is None:
+        if last_error:
+            logger.warning("Binance unavailable for %s after trying all hosts (%s)", pair, last_error)
+        return []
 
     if not isinstance(raw, list):
         return []
