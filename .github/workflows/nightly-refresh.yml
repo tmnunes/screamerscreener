@@ -35,10 +35,17 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           set -euo pipefail
-          curl -fsS -X POST "${API_URL}/api/refresh/stocks" \
+          body="$(mktemp)"
+          code="$(curl -sS -o "$body" -w "%{http_code}" -X POST "${API_URL}/api/refresh/stocks" \
             -H "Content-Type: application/json" \
             -H "X-Cron-Secret: ${CRON_SECRET}" \
-            --max-time 1500
+            --max-time 1500)"
+          cat "$body"
+          echo
+          if [[ "$code" != "200" ]]; then
+            echo "::error::Refresh stocks failed with HTTP ${code}"
+            exit 1
+          fi
 
       - name: Refresh crypto
         if: ${{ github.event_name == 'schedule' || inputs.target == 'all' || inputs.target == 'crypto' }}
@@ -47,7 +54,14 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           set -euo pipefail
-          curl -fsS -X POST "${API_URL}/api/refresh/crypto" \
+          body="$(mktemp)"
+          code="$(curl -sS -o "$body" -w "%{http_code}" -X POST "${API_URL}/api/refresh/crypto" \
             -H "Content-Type: application/json" \
             -H "X-Cron-Secret: ${CRON_SECRET}" \
-            --max-time 1500
+            --max-time 1500)"
+          cat "$body"
+          echo
+          if [[ "$code" != "200" ]]; then
+            echo "::error::Refresh crypto failed with HTTP ${code}"
+            exit 1
+          fi
