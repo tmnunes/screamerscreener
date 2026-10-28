@@ -79,6 +79,21 @@ def data_status_for(asset_type: str) -> dict[str, Any]:
     )
     status = "up_to_date" if last_candle else "no_data"
 
+    # Surface last pipeline outcome for ops (universe source, errors, etc.)
+    last_sync_detail: dict[str, Any] = {}
+    sync_run = ingestion or refresh
+    if isinstance(sync_run, dict) and isinstance(sync_run.get("detail"), dict):
+        detail = sync_run["detail"]
+        universe = detail.get("universe")
+        if isinstance(universe, dict):
+            last_sync_detail["universe_source"] = universe.get("source")
+            last_sync_detail["universe_tickers"] = universe.get("tickers")
+        if detail.get("error"):
+            last_sync_detail["error"] = detail.get("error")
+        if detail.get("provider"):
+            last_sync_detail["sync_provider"] = detail.get("provider")
+        last_sync_detail["pipeline_status"] = sync_run.get("status")
+
     return {
         "asset_type": asset,
         "provider": provider,
@@ -95,6 +110,7 @@ def data_status_for(asset_type: str) -> dict[str, Any]:
         "max_requests_per_run": max_per_run,
         "status": status,
         "top_n": settings.crypto_top_n if asset == "CRYPTO" else None,
+        "last_sync_detail": last_sync_detail or None,
     }
 
 
