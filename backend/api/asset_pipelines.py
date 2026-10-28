@@ -40,15 +40,19 @@ def data_status_for(asset_type: str) -> dict[str, Any]:
         .execute()
     )
     ids = [r["id"] for r in (instruments.data or [])]
+    # Count instruments that have at least one daily candle. Do not SELECT all
+    # price rows — PostgREST caps pages (~1000) and under-counts large histories.
     with_data = 0
-    if ids:
-        price_rows = (
+    for instrument_id in ids:
+        sample = (
             client.table("market_prices_daily")
             .select("instrument_id")
-            .in_("instrument_id", ids)
+            .eq("instrument_id", instrument_id)
+            .limit(1)
             .execute()
         ).data or []
-        with_data = len({r["instrument_id"] for r in price_rows})
+        if sample:
+            with_data += 1
 
     if asset == "CRYPTO":
         ingestion = latest_pipeline("ingestion_crypto")

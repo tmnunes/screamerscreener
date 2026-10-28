@@ -41,8 +41,8 @@ def binance_pair(api_symbol: str) -> str | None:
     sym = api_symbol.upper().strip()
     if not sym or sym in _SKIP:
         return None
-    # Common renames
-    aliases = {"MATIC": "MATIC", "POL": "POL"}
+    # Spot renames / rebrands (MATIC → POL on Binance)
+    aliases = {"MATIC": "POL", "POL": "POL"}
     sym = aliases.get(sym, sym)
     return f"{sym}USDT"
 

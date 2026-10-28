@@ -1,5 +1,8 @@
-# Nightly refresh — 00:00 Europe/Lisbon (GitHub Actions cron is UTC;
-# 23:00 UTC ≈ midnight Lisbon in summer / 00:00 UTC in winter — adjust if needed).
+# Nightly refresh — ~00:00 Europe/Lisbon (GitHub Actions cron is UTC).
+# Winter (WET, UTC+0): 00:00 UTC. Summer (WEST, UTC+1): use 23:00 UTC instead.
+#
+# GitHub disables scheduled workflows after ~60 days without repo activity.
+# Any push/commit re-enables them — keep this file or main moving if nights go quiet.
 #
 # Required repo secrets:
 #   API_URL      — https://your-api.onrender.com
@@ -9,8 +12,8 @@ name: Nightly refresh
 
 on:
   schedule:
-    # 00:00 Lisbon (WEST, UTC+1) ≈ 23:00 UTC
-    - cron: "0 23 * * *"
+    # 00:00 Lisbon in winter (WET)
+    - cron: "0 0 * * *"
   workflow_dispatch:
     inputs:
       target:
