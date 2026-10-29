@@ -10,6 +10,7 @@ SQL Editor if the CLI cannot link the project.
 3. `supabase/migrations/20260823000300_secondary_indicators.sql` ← secondary indicators
 4. `supabase/migrations/20260823000400_return_15d.sql` ← +15d performance column
 5. `supabase/migrations/20260823000500_crypto_asset_type.sql` ← STOCK/CRYPTO + crypto regime
+6. `supabase/migrations/20261029000600_research_futures.sql` ← quant research perps candles/funding/results
 
 ## After secondary / 15d / crypto migrations
 

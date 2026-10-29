@@ -49,3 +49,11 @@ tmp/
 exports/
 *.csv
 !tests/fixtures/**/*.csv
+!backend/research/reports/**
+
+# Quant research market data (large raw/parquet); keep schema/scripts in git
+data/research/raw/
+data/research/normalized/
+data/research/cache/
+data/research/*.db
+data/research/*.db-*
