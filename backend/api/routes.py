@@ -494,7 +494,9 @@ def crypto_overview() -> dict[str, Any]:
 
     live_quotes: dict[str, dict[str, Any]] = {}
     provider_note = None
-    if settings.freecryptoapi_api_key and instruments:
+    if not settings.freecryptoapi_api_key:
+        provider_note = "FREECRYPTOAPI_API_KEY not set — live quotes disabled"
+    elif instruments:
         try:
             from backend.data.freecryptoapi import FreeCryptoAPIProvider
 
@@ -503,6 +505,11 @@ def crypto_overview() -> dict[str, Any]:
                 (inst.get("api_symbol") or inst["ticker"]) for inst in instruments
             ]
             live_quotes = provider.get_latest_many(symbols)
+            if not live_quotes:
+                provider_note = (
+                    "FreeCryptoAPI /getData returned no quotes "
+                    f"(requests_used={provider.requests_used})"
+                )
         except Exception as exc:
             provider_note = str(exc)
 
@@ -609,6 +616,7 @@ def crypto_overview() -> dict[str, Any]:
             "run: python -m backend.ingestion.initial_load_crypto "
             "(uses Binance public daily as OHLC fallback)."
         )
+    sync_detail = status.get("last_sync_detail") or {}
     return {
         "top_n": settings.crypto_top_n,
         "last_data": status.get("last_daily_candle"),
@@ -616,6 +624,8 @@ def crypto_overview() -> dict[str, Any]:
         "rows": rows_out,
         "note": note,
         "live_quotes": len(live_quotes),
+        "universe_source": sync_detail.get("universe_source"),
+        "instruments_with_data": instruments_with_prices,
     }
 
 

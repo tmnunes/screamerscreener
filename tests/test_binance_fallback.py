@@ -16,6 +16,9 @@ def test_binance_pair_mapping() -> None:
     assert binance_pair("BTC") == "BTCUSDT"
     assert binance_pair("eth") == "ETHUSDT"
     assert binance_pair("USDT") is None
+    # Polygon rebrand: legacy MATIC ticker must hit POLUSDT
+    assert binance_pair("MATIC") == "POLUSDT"
+    assert binance_pair("POL") == "POLUSDT"
 
 
 def test_binance_primary_url_is_public_data_host() -> None:

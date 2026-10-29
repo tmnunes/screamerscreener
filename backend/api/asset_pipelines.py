@@ -40,15 +40,19 @@ def data_status_for(asset_type: str) -> dict[str, Any]:
         .execute()
     )
     ids = [r["id"] for r in (instruments.data or [])]
+    # Count instruments that have at least one daily candle. Do not SELECT all
+    # price rows — PostgREST caps pages (~1000) and under-counts large histories.
     with_data = 0
-    if ids:
-        price_rows = (
+    for instrument_id in ids:
+        sample = (
             client.table("market_prices_daily")
             .select("instrument_id")
-            .in_("instrument_id", ids)
+            .eq("instrument_id", instrument_id)
+            .limit(1)
             .execute()
         ).data or []
-        with_data = len({r["instrument_id"] for r in price_rows})
+        if sample:
+            with_data += 1
 
     if asset == "CRYPTO":
         ingestion = latest_pipeline("ingestion_crypto")
@@ -75,6 +79,21 @@ def data_status_for(asset_type: str) -> dict[str, Any]:
     )
     status = "up_to_date" if last_candle else "no_data"
 
+    # Surface last pipeline outcome for ops (universe source, errors, etc.)
+    last_sync_detail: dict[str, Any] = {}
+    sync_run = ingestion or refresh
+    if isinstance(sync_run, dict) and isinstance(sync_run.get("detail"), dict):
+        detail = sync_run["detail"]
+        universe = detail.get("universe")
+        if isinstance(universe, dict):
+            last_sync_detail["universe_source"] = universe.get("source")
+            last_sync_detail["universe_tickers"] = universe.get("tickers")
+        if detail.get("error"):
+            last_sync_detail["error"] = detail.get("error")
+        if detail.get("provider"):
+            last_sync_detail["sync_provider"] = detail.get("provider")
+        last_sync_detail["pipeline_status"] = sync_run.get("status")
+
     return {
         "asset_type": asset,
         "provider": provider,
@@ -91,6 +110,7 @@ def data_status_for(asset_type: str) -> dict[str, Any]:
         "max_requests_per_run": max_per_run,
         "status": status,
         "top_n": settings.crypto_top_n if asset == "CRYPTO" else None,
+        "last_sync_detail": last_sync_detail or None,
     }
 
 
