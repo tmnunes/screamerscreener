@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import date
 from typing import Any
 
@@ -23,9 +24,21 @@ TRIGGER_SELECT = (
     "trigger_performance(*)"
 )
 
+# Short TTL cache — instrument universe changes rarely vs. dashboard traffic.
+_INSTRUMENT_IDS_TTL_SEC = 60.0
+_instrument_ids_cache: dict[str, tuple[float, list[str]]] = {}
+_LATEST_DATE_TTL_SEC = 30.0
+_latest_date_cache: dict[str, tuple[float, date | None]] = {}
+
 
 def default_params() -> tuple[int, float, str]:
     return DEFAULT_LENGTH, DEFAULT_MULT, DEFAULT_SOURCE
+
+
+def clear_api_caches() -> None:
+    """Test helper / after seed changes."""
+    _instrument_ids_cache.clear()
+    _latest_date_cache.clear()
 
 
 def get_instrument_by_ticker(
@@ -44,29 +57,44 @@ def get_instrument_by_ticker(
 
 
 def instrument_ids_for_asset_type(asset_type: str) -> list[str]:
+    key = asset_type.upper()
+    now = time.monotonic()
+    cached = _instrument_ids_cache.get(key)
+    if cached and now - cached[0] < _INSTRUMENT_IDS_TTL_SEC:
+        return list(cached[1])
+
     client = get_supabase()
     rows = (
         client.table("market_instruments")
         .select("id")
-        .eq("asset_type", asset_type.upper())
+        .eq("asset_type", key)
         .execute()
     ).data or []
-    return [r["id"] for r in rows]
+    ids = [r["id"] for r in rows]
+    _instrument_ids_cache[key] = (now, ids)
+    return list(ids)
 
 
 def latest_market_date(asset_type: str | None = None) -> date | None:
     """Latest candle date. Optionally scoped to STOCK or CRYPTO instruments."""
+    cache_key = (asset_type or "").upper() or "_ALL"
+    now = time.monotonic()
+    cached = _latest_date_cache.get(cache_key)
+    if cached and now - cached[0] < _LATEST_DATE_TTL_SEC:
+        return cached[1]
+
     client = get_supabase()
     query = client.table("market_prices_daily").select("date")
     if asset_type:
         ids = instrument_ids_for_asset_type(asset_type)
         if not ids:
+            _latest_date_cache[cache_key] = (now, None)
             return None
         query = query.in_("instrument_id", ids)
     rows = query.order("date", desc=True).limit(1).execute().data or []
-    if not rows:
-        return None
-    return date.fromisoformat(rows[0]["date"])
+    result = date.fromisoformat(rows[0]["date"]) if rows else None
+    _latest_date_cache[cache_key] = (now, result)
+    return result
 
 
 def latest_pipeline(run_type: str) -> dict[str, Any] | None:
@@ -229,9 +257,30 @@ def _refresh_performance(
         ).execute()
 
 
-def enrich_triggers(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _rows_already_embedded(rows: list[dict[str, Any]]) -> bool:
+    """True when rows already include nested instrument / performance joins."""
+    if not rows:
+        return False
+    sample = rows[0]
+    return "market_instruments" in sample or (
+        "ticker" in sample and ("performance" in sample or "trigger_performance" in sample)
+    )
+
+
+def _flatten_trigger_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attach instrument + stored performance without recomputing returns."""
     if not rows:
         return []
+
+    if _rows_already_embedded(rows):
+        flat_rows = []
+        for item in rows:
+            row = dict(item)
+            if "market_instruments" in row or "trigger_performance" in row:
+                flat_rows.append(flatten_trigger_row(row))
+            else:
+                flat_rows.append(row)
+        return flat_rows
 
     trigger_ids = [r["id"] for r in rows]
     client = get_supabase()
@@ -280,17 +329,45 @@ def enrich_triggers(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 }
             )
 
-    _refresh_performance(flat_rows)
-    secondary_map = _fetch_secondary_map(flat_rows)
-    dates = list({t["date"] for t in flat_rows})
-    stock_regime_map = _fetch_regime_map(dates)
-    crypto_regime_map = _fetch_crypto_regime_map(dates)
-    for item in flat_rows:
-        _attach_secondary_signals(
-            item, secondary_map, stock_regime_map, crypto_regime_map
-        )
     by_id = {item["id"]: item for item in flat_rows}
     return [by_id.get(r["id"], {**r, "performance": None}) for r in rows]
+
+
+def enrich_triggers(
+    rows: list[dict[str, Any]],
+    *,
+    refresh_performance: bool = False,
+    include_secondary: bool = True,
+) -> list[dict[str, Any]]:
+    """
+    Flatten trigger rows with instrument + performance.
+
+    Performance is computed during nightly calculation — list endpoints must NOT
+    recompute it on every page load (that was the main dashboard bottleneck).
+    Detail views may pass refresh_performance=True.
+    """
+    if not rows:
+        return []
+
+    flat_rows = _flatten_trigger_rows(rows)
+
+    if refresh_performance:
+        _refresh_performance(flat_rows)
+
+    if include_secondary:
+        secondary_map = _fetch_secondary_map(flat_rows)
+        dates = list({t["date"] for t in flat_rows})
+        stock_regime_map = _fetch_regime_map(dates)
+        crypto_regime_map = _fetch_crypto_regime_map(dates)
+        for item in flat_rows:
+            _attach_secondary_signals(
+                item, secondary_map, stock_regime_map, crypto_regime_map
+            )
+    else:
+        for item in flat_rows:
+            item.setdefault("secondary_signals", None)
+
+    return flat_rows
 
 
 def _attach_performance_meta(

@@ -1,13 +1,19 @@
 const API_URL = process.env.API_URL ?? "http://localhost:8000";
 
+/** Market data is daily — short ISR cache cuts repeat loads without going stale. */
+const READ_REVALIDATE_SECONDS = 60;
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method ?? "GET").toUpperCase();
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
       ...(init?.headers ?? {}),
     },
-    cache: "no-store",
+    ...(method === "GET"
+      ? { next: { revalidate: READ_REVALIDATE_SECONDS } }
+      : { cache: "no-store" as const }),
   });
   if (!res.ok) {
     const text = await res.text();

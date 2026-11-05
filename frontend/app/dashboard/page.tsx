@@ -1,40 +1,19 @@
+import { Suspense } from "react";
 import { SiteHeader } from "@/components/site-header";
-import { TriggerCard } from "@/components/trigger-card";
-import { RecentTimeline } from "@/components/recent-timeline";
 import { RefreshStocksButton } from "@/components/refresh-button";
-import { LongStatsPanel } from "@/components/long-stats-panel";
 import { UniverseTabs } from "@/components/universe-tabs";
-import { MarketDataPanel } from "@/components/market-data-panel";
+import { LoadingBlock } from "@/components/loading-block";
 import {
-  fetchDataStatusStocks,
-  fetchLongPerformanceStats,
-  fetchRecent,
-  fetchStats,
-  fetchToday,
-} from "@/lib/api";
+  StocksHeroStats,
+  StocksLongStatsSection,
+  StocksMarketDataSection,
+  StocksRecentSection,
+} from "@/components/dashboard-sections";
 
+// Request-time only — needs live FastAPI data (cannot prerender at build).
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
-  let today = null;
-  let recent = null;
-  let stats = null;
-  let status = null;
-  let longStats = null;
-  let error: string | null = null;
-
-  try {
-    [today, recent, stats, status, longStats] = await Promise.all([
-      fetchToday("STOCK"),
-      fetchRecent(30, "STOCK"),
-      fetchStats("STOCK"),
-      fetchDataStatusStocks(),
-      fetchLongPerformanceStats("STOCK"),
-    ]);
-  } catch (err) {
-    error = err instanceof Error ? err.message : "Failed to load dashboard data";
-  }
-
+export default function DashboardPage() {
   return (
     <>
       <SiteHeader active="stocks" />
@@ -53,95 +32,22 @@ export default async function DashboardPage() {
 
         <UniverseTabs active="stocks" />
 
-        {error ? (
-          <div className="rounded border border-[var(--line)] bg-white p-4 text-sm text-[var(--short)]">
-            {error}
-            <p className="mt-2 text-[var(--muted)]">
-              Ensure the API is running and migration 5 (asset_type) is applied.
-            </p>
-          </div>
-        ) : (
-          <>
-            <section className="mb-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <Stat label="Last market data" value={status?.last_daily_candle ?? "—"} />
-              <Stat
-                label="Last calculation"
-                value={
-                  status?.last_calculation
-                    ? new Date(status.last_calculation).toLocaleString()
-                    : "—"
-                }
-              />
-              <Stat label="Stocks" value={String(stats?.stocks ?? 0)} />
-              <Stat
-                label="Triggers today"
-                value={`${stats?.today.long ?? 0} LONG · ${stats?.today.short ?? 0} SHORT · ${stats?.today.stop ?? 0} STOP`}
-              />
-            </section>
+        <Suspense fallback={<LoadingBlock label="Loading today’s triggers…" />}>
+          <StocksHeroStats />
+        </Suspense>
 
-            <section className="mb-12 grid gap-8 lg:grid-cols-3">
-              <TriggerColumn title="LONG" color="var(--long)" items={today?.long ?? []} />
-              <TriggerColumn title="SHORT" color="var(--short)" items={today?.short ?? []} />
-              <TriggerColumn title="STOP" color="var(--stop)" items={today?.stop ?? []} />
-            </section>
+        <Suspense fallback={<LoadingBlock label="Loading recent timeline…" />}>
+          <StocksRecentSection />
+        </Suspense>
 
-            <RecentTimeline days={recent?.days ?? []} />
+        <Suspense fallback={<LoadingBlock label="Loading LONG stats…" />}>
+          <StocksLongStatsSection />
+        </Suspense>
 
-            <section className="mt-12 border-t border-[var(--line)] pt-8">
-              <LongStatsPanel data={longStats} showByStock title="LONG performance · Stocks" />
-            </section>
-
-            <section className="mt-12 border-t border-[var(--line)] pt-8">
-              <MarketDataPanel
-                title="MARKET DATA · STOCKS"
-                status={status}
-                refreshSlot={<RefreshStocksButton />}
-              />
-            </section>
-          </>
-        )}
+        <Suspense fallback={<LoadingBlock label="Loading market data…" />}>
+          <StocksMarketDataSection />
+        </Suspense>
       </main>
     </>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded border border-[var(--line)] bg-white p-4">
-      <div className="text-xs tracking-wide text-[var(--muted)] uppercase">{label}</div>
-      <div className="mt-2 text-sm font-medium">{value}</div>
-    </div>
-  );
-}
-
-function TriggerColumn({
-  title,
-  color,
-  items,
-}: {
-  title: string;
-  color: string;
-  items: import("@/lib/api").Trigger[];
-}) {
-  return (
-    <div>
-      <h2
-        className="mb-3 flex items-center gap-2 text-sm font-semibold tracking-[0.12em]"
-        style={{ color }}
-      >
-        <span
-          className="inline-block h-2.5 w-2.5 rounded-full"
-          style={{ background: color }}
-        />
-        {title}
-      </h2>
-      <div className="rounded border border-[var(--line)] bg-white px-4">
-        {items.length === 0 ? (
-          <p className="py-6 text-sm text-[var(--muted)]">No triggers</p>
-        ) : (
-          items.map((t) => <TriggerCard key={t.id} trigger={t} />)
-        )}
-      </div>
-    </div>
   );
 }
