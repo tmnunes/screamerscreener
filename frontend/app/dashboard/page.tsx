@@ -10,7 +10,8 @@ import {
   StocksRecentSection,
 } from "@/components/dashboard-sections";
 
-export const revalidate = 60;
+// Request-time only — needs live FastAPI data (cannot prerender at build).
+export const dynamic = "force-dynamic";
 
 export default function DashboardPage() {
   return (

@@ -11,7 +11,7 @@ import {
   CryptoRecentSection,
 } from "@/components/dashboard-sections";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 export default function CryptoPage() {
   return (
