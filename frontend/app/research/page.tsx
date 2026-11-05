@@ -3,7 +3,7 @@ import { LongStatsPanel } from "@/components/long-stats-panel";
 import { UniverseTabs } from "@/components/universe-tabs";
 import { fetchLongPerformanceStats, type AssetType } from "@/lib/api";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 export default async function ResearchPage({
   searchParams,

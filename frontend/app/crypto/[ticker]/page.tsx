@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 /** Crypto detail reuses the shared stock detail surface (same Vortex/UI). */
 export default async function CryptoTickerPage({

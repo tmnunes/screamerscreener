@@ -3,7 +3,7 @@ import { SiteHeader } from "@/components/site-header";
 import { SecondarySignalPanel } from "@/components/secondary-signals";
 import { fetchTrigger, formatDay, formatPct, formatPrice } from "@/lib/api";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 const HORIZONS = [
   { key: "1d" as const, label: "+1D", field: "return_1d" as const, days: 1 },
