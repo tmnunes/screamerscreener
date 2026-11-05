@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend.api.deps import (
+    TRIGGER_SELECT,
     default_params,
     enrich_triggers,
     get_instrument_by_ticker,
@@ -227,7 +228,7 @@ def get_stock_triggers(
     client = get_supabase()
     rows = (
         client.table("triggers_daily")
-        .select("*")
+        .select(TRIGGER_SELECT)
         .eq("instrument_id", inst["id"])
         .eq("length", length)
         .eq("mult", mult)
@@ -253,7 +254,7 @@ def triggers_today(
     client = get_supabase()
     query = (
         client.table("triggers_daily")
-        .select("*")
+        .select(TRIGGER_SELECT)
         .eq("date", market_date.isoformat())
         .eq("length", d_length)
         .eq("mult", d_mult)
@@ -295,7 +296,7 @@ def triggers_recent(
     client = get_supabase()
     query = (
         client.table("triggers_daily")
-        .select("*")
+        .select(TRIGGER_SELECT)
         .gte("date", start.isoformat())
         .lte("date", market_date.isoformat())
         .eq("length", d_length)
@@ -311,15 +312,17 @@ def triggers_recent(
         by_date.setdefault(row["date"], []).append(row)
 
     ids = instrument_ids_for_asset_type(scope)
+    # Distinct trading days: one instrument's calendar is enough (avoids huge scans).
+    calendar_id = ids[0] if ids else None
     price_query = (
         client.table("market_prices_daily")
         .select("date")
         .lte("date", market_date.isoformat())
         .order("date", desc=True)
-        .limit(max(days * 30, 200))
+        .limit(max(days * 3, 90))
     )
-    if ids:
-        price_query = price_query.in_("instrument_id", ids)
+    if calendar_id:
+        price_query = price_query.eq("instrument_id", calendar_id)
     price_rows = price_query.execute().data or []
 
     day_list = []
@@ -360,7 +363,7 @@ def list_triggers(
     client = get_supabase()
     query = (
         client.table("triggers_daily")
-        .select("*")
+        .select(TRIGGER_SELECT)
         .eq("length", d_length)
         .eq("mult", d_mult)
         .eq("source", d_source)
@@ -397,18 +400,31 @@ def stats(
         .eq("asset_type", scope)
         .execute()
     )
-    today = triggers_today(asset_type=scope)
     last = latest_market_date(scope)
+    today_counts = {"date": None, "long": 0, "short": 0, "stop": 0}
+    if last is not None:
+        d_length, d_mult, d_source = default_params()
+        query = (
+            client.table("triggers_daily")
+            .select("id,trigger_type")
+            .eq("date", last.isoformat())
+            .eq("length", d_length)
+            .eq("mult", d_mult)
+            .eq("source", d_source)
+        )
+        query = _filter_by_asset_type(query, scope)
+        rows = query.execute().data or [] if query is not None else []
+        today_counts = {
+            "date": last.isoformat(),
+            "long": sum(1 for r in rows if r["trigger_type"] == "LONG"),
+            "short": sum(1 for r in rows if r["trigger_type"] == "SHORT"),
+            "stop": sum(1 for r in rows if r["trigger_type"] == "STOP"),
+        }
     return {
         "asset_type": scope,
         "stocks": instruments.count or 0,
         "instruments": instruments.count or 0,
-        "today": {
-            "date": today["date"],
-            "long": len(today["long"]),
-            "short": len(today["short"]),
-            "stop": len(today["stop"]),
-        },
+        "today": today_counts,
         "last_market_date": last.isoformat() if last else None,
     }
 
@@ -419,11 +435,12 @@ def _long_triggers(
     asset_type: str | None = "STOCK",
     limit: int = 5000,
 ) -> list[dict[str, Any]]:
+    """LONG triggers with stored performance only — no secondary / no recompute."""
     d_length, d_mult, d_source = default_params()
     client = get_supabase()
     query = (
         client.table("triggers_daily")
-        .select("*")
+        .select(TRIGGER_SELECT)
         .eq("trigger_type", "LONG")
         .eq("length", d_length)
         .eq("mult", d_mult)
@@ -437,7 +454,11 @@ def _long_triggers(
         query = _filter_by_asset_type(query, asset_type.upper())
         if query is None:
             return []
-    return enrich_triggers(query.execute().data or [])
+    return enrich_triggers(
+        query.execute().data or [],
+        refresh_performance=False,
+        include_secondary=False,
+    )
 
 
 @router.get("/api/stats/long-performance")
@@ -478,6 +499,35 @@ def stock_long_stats(ticker: str) -> dict[str, Any]:
     }
 
 
+def _latest_by_instrument(
+    rows: list[dict[str, Any]], *, date_key: str = "date"
+) -> dict[str, dict[str, Any]]:
+    """Keep the newest row per instrument_id (rows should be date-desc ordered)."""
+    latest: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        iid = row["instrument_id"]
+        if iid not in latest:
+            latest[iid] = row
+            continue
+        if row.get(date_key) and latest[iid].get(date_key):
+            if row[date_key] > latest[iid][date_key]:
+                latest[iid] = row
+    return latest
+
+
+def _prices_last_two(
+    rows: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Group price rows by instrument, keep up to 2 newest dates."""
+    by_id: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_id.setdefault(row["instrument_id"], []).append(row)
+    for iid, bucket in by_id.items():
+        bucket.sort(key=lambda r: r["date"], reverse=True)
+        by_id[iid] = bucket[:2]
+    return by_id
+
+
 @router.get("/api/crypto/overview")
 def crypto_overview() -> dict[str, Any]:
     """TOP-N crypto table: price, vortex/trigger, secondary snapshot."""
@@ -514,19 +564,73 @@ def crypto_overview() -> dict[str, Any]:
             provider_note = str(exc)
 
     d_length, d_mult, d_source = default_params()
+    ids = [inst["id"] for inst in instruments]
+    prices_by_id: dict[str, list[dict[str, Any]]] = {}
+    ind_by_id: dict[str, dict[str, Any]] = {}
+    sec_by_id: dict[str, dict[str, Any]] = {}
+    trig_by_id: dict[str, dict[str, Any]] = {}
+
+    if ids:
+        last = latest_market_date("CRYPTO")
+        # Pull a short recent window (batched) instead of 4 queries × N instruments.
+        window_start = (
+            (last - timedelta(days=14)).isoformat() if last else "1970-01-01"
+        )
+        price_rows = (
+            client.table("market_prices_daily")
+            .select("instrument_id,date,close")
+            .in_("instrument_id", ids)
+            .gte("date", window_start)
+            .order("date", desc=True)
+            .limit(max(len(ids) * 3, 100))
+            .execute()
+        ).data or []
+        prices_by_id = _prices_last_two(price_rows)
+
+        ind_rows = (
+            client.table("indicator_values_daily")
+            .select("instrument_id,date,basis,upper,lower")
+            .in_("instrument_id", ids)
+            .eq("length", d_length)
+            .eq("mult", d_mult)
+            .eq("source", d_source)
+            .gte("date", window_start)
+            .order("date", desc=True)
+            .limit(max(len(ids) * 2, 50))
+            .execute()
+        ).data or []
+        ind_by_id = _latest_by_instrument(ind_rows)
+
+        sec_rows = (
+            client.table("secondary_indicator_values_daily")
+            .select("instrument_id,date,rsi14,adx14,relative_volume,ema20,ema50")
+            .in_("instrument_id", ids)
+            .gte("date", window_start)
+            .order("date", desc=True)
+            .limit(max(len(ids) * 2, 50))
+            .execute()
+        ).data or []
+        sec_by_id = _latest_by_instrument(sec_rows)
+
+        trig_rows = (
+            client.table("triggers_daily")
+            .select("id,instrument_id,date,trigger_type")
+            .in_("instrument_id", ids)
+            .eq("length", d_length)
+            .eq("mult", d_mult)
+            .eq("source", d_source)
+            .order("date", desc=True)
+            .limit(max(len(ids) * 3, 75))
+            .execute()
+        ).data or []
+        trig_by_id = _latest_by_instrument(trig_rows)
+
     rows_out: list[dict[str, Any]] = []
     for inst in instruments:
         iid = inst["id"]
         ticker = inst["ticker"]
         api_symbol = (inst.get("api_symbol") or ticker).upper()
-        prices = (
-            client.table("market_prices_daily")
-            .select("date,close")
-            .eq("instrument_id", iid)
-            .order("date", desc=True)
-            .limit(2)
-            .execute()
-        ).data or []
+        prices = prices_by_id.get(iid) or []
         price = float(prices[0]["close"]) if prices else None
         prev = float(prices[1]["close"]) if len(prices) > 1 else None
         change_24h = (
@@ -539,38 +643,8 @@ def crypto_overview() -> dict[str, Any]:
             if live.get("change_24h") is not None:
                 change_24h = float(live["change_24h"])
 
-        ind = (
-            client.table("indicator_values_daily")
-            .select("date,basis,upper,lower")
-            .eq("instrument_id", iid)
-            .eq("length", d_length)
-            .eq("mult", d_mult)
-            .eq("source", d_source)
-            .order("date", desc=True)
-            .limit(1)
-            .execute()
-        ).data or []
-        sec = (
-            client.table("secondary_indicator_values_daily")
-            .select("date,rsi14,adx14,relative_volume,ema20,ema50")
-            .eq("instrument_id", iid)
-            .order("date", desc=True)
-            .limit(1)
-            .execute()
-        ).data or []
-        trig = (
-            client.table("triggers_daily")
-            .select("id,date,trigger_type")
-            .eq("instrument_id", iid)
-            .eq("length", d_length)
-            .eq("mult", d_mult)
-            .eq("source", d_source)
-            .order("date", desc=True)
-            .limit(1)
-            .execute()
-        ).data or []
-
-        latest_sec = sec[0] if sec else {}
+        ind = ind_by_id.get(iid)
+        latest_sec = sec_by_id.get(iid) or {}
         ema20 = latest_sec.get("ema20")
         ema50 = latest_sec.get("ema50")
         trend = None
@@ -582,8 +656,7 @@ def crypto_overview() -> dict[str, Any]:
             else:
                 trend = "Neutral"
 
-        last_trig = trig[0] if trig else None
-        # Same-day trigger if matches latest price date
+        last_trig = trig_by_id.get(iid)
         same_day_trigger = None
         if last_trig and prices and last_trig["date"] == prices[0]["date"]:
             same_day_trigger = last_trig["trigger_type"]
@@ -596,13 +669,21 @@ def crypto_overview() -> dict[str, Any]:
                 "in_top_universe": inst.get("in_top_universe", True),
                 "price": price,
                 "change_24h": change_24h,
-                "vortex": ind[0] if ind else None,
+                "vortex": ind,
                 "trigger": same_day_trigger,
                 "rsi14": latest_sec.get("rsi14"),
                 "adx14": latest_sec.get("adx14"),
                 "relative_volume": latest_sec.get("relative_volume"),
                 "trend": trend,
-                "last_trigger": last_trig,
+                "last_trigger": (
+                    {
+                        "id": last_trig["id"],
+                        "date": last_trig["date"],
+                        "trigger_type": last_trig["trigger_type"],
+                    }
+                    if last_trig
+                    else None
+                ),
             }
         )
 

@@ -40,19 +40,6 @@ def data_status_for(asset_type: str) -> dict[str, Any]:
         .execute()
     )
     ids = [r["id"] for r in (instruments.data or [])]
-    # Count instruments that have at least one daily candle. Do not SELECT all
-    # price rows — PostgREST caps pages (~1000) and under-counts large histories.
-    with_data = 0
-    for instrument_id in ids:
-        sample = (
-            client.table("market_prices_daily")
-            .select("instrument_id")
-            .eq("instrument_id", instrument_id)
-            .limit(1)
-            .execute()
-        ).data or []
-        if sample:
-            with_data += 1
 
     if asset == "CRYPTO":
         ingestion = latest_pipeline("ingestion_crypto")
@@ -74,6 +61,17 @@ def data_status_for(asset_type: str) -> dict[str, Any]:
         max_per_run = settings.max_eodhd_requests_per_run
 
     last_candle = latest_market_date(asset)
+    # One query: instruments that have the latest candle (avoids N+1 existence checks).
+    with_data = 0
+    if last_candle and ids:
+        priced = (
+            client.table("market_prices_daily")
+            .select("instrument_id")
+            .eq("date", last_candle.isoformat())
+            .in_("instrument_id", ids)
+            .execute()
+        ).data or []
+        with_data = len({r["instrument_id"] for r in priced})
     last_refresh = (refresh or {}).get("finished_at") or (refresh or {}).get(
         "started_at"
     )
