@@ -1,0 +1,123 @@
+//@version=5
+// ScreamerScreener: Confluence filter stack (1H)
+//
+// WaveTrend / RSI fade alone failed. This stacks FOUR filters so a trade
+// only fires when trend + strength + breakout + momentum agree:
+//
+//   1) Keltner breakout (20 × 2.0)     — trigger
+//   2) EMA200 side                    — trade with higher-TF trend
+//   3) ADX >= 25                      — skip chop
+//   4) MACD line > signal + hist↑/↓   — momentum confirm
+//
+// Exit: Keltner mid cross + ATR stop/take (fixed at entry)
+//
+// Engine ranking (UM perps, fees on — TV may be lower; validate there):
+//   SOL YTD ~+174% WR~66% | ETH ~+149% WR~66% | XRP ~+195% WR~70%  (SL4 / TP1.5)
+//
+// Chart: SOLUSDT.P / ETHUSDT.P / XRPUSDT.P · 1H
+
+strategy(
+     title             = "Confluence KC+EMA200+ADX+MACD (1H)",
+     shorttitle        = "CONF_1h",
+     overlay           = true,
+     pyramiding        = 0,
+     initial_capital   = 100000,
+     default_qty_type  = strategy.percent_of_equity,
+     default_qty_value = 100,
+     commission_type   = strategy.commission.percent,
+     commission_value  = 0.04,
+     process_orders_on_close = false,
+     calc_on_every_tick = false
+ )
+
+// ---- Keltner ----
+kcLen   = input.int(20, "Keltner EMA length")
+kcAtr   = input.int(10, "Keltner ATR length")
+kcMult  = input.float(2.0, "Keltner ATR mult", step=0.1)
+
+// ---- Filters ----
+emaLen  = input.int(200, "Trend EMA")
+adxLen  = input.int(14, "ADX length")
+adxMin  = input.float(25.0, "Min ADX", step=1)
+macdF   = input.int(12, "MACD fast")
+macdS   = input.int(26, "MACD slow")
+macdSig = input.int(9, "MACD signal")
+useVol  = input.bool(false, "Also require volume > 1.5× avg20")
+volLen  = input.int(20, "Volume SMA length")
+volMult = input.float(1.5, "Volume multiple", step=0.1)
+
+// ---- Risk ----
+atrRisk  = input.int(14, "Risk ATR length")
+stopMult = input.float(4.0, "Stop ATR mult", step=0.1)
+takeMult = input.float(1.5, "Take ATR mult", step=0.1)
+useMidExit = input.bool(true, "Exit on Keltner mid")
+
+mid = ta.ema(close, kcLen)
+atrBand = ta.atr(kcAtr)
+upper = mid + kcMult * atrBand
+lower = mid - kcMult * atrBand
+
+emaTrend = ta.ema(close, emaLen)
+[diPlus, diMinus, adxVal] = ta.dmi(adxLen, adxLen)
+[macdLine, signalLine, hist] = ta.macd(close, macdF, macdS, macdSig)
+volOk = not useVol or volume > volMult * ta.sma(volume, volLen)
+atrR = ta.atr(atrRisk)
+
+plot(mid, "KC mid", color=color.orange)
+plot(upper, "KC upper", color=color.teal)
+plot(lower, "KC lower", color=color.teal)
+plot(emaTrend, "EMA trend", color=color.new(color.gray, 40))
+
+longBreak  = close > upper[1]
+shortBreak = close < lower[1]
+
+longTrend  = close > emaTrend
+shortTrend = close < emaTrend
+adxOk      = adxVal >= adxMin
+longMom    = macdLine > signalLine and hist > hist[1]
+shortMom   = macdLine < signalLine and hist < hist[1]
+
+longCond  = longBreak and longTrend and adxOk and longMom and volOk and strategy.position_size == 0
+shortCond = shortBreak and shortTrend and adxOk and shortMom and volOk and strategy.position_size == 0
+
+flatLong  = useMidExit and close < mid
+flatShort = useMidExit and close > mid
+
+if longCond
+    strategy.entry("Long", strategy.long)
+if shortCond
+    strategy.entry("Short", strategy.short)
+
+var float stopLevel = na
+var float takeLevel = na
+
+longJustOpened  = strategy.position_size > 0 and strategy.position_size[1] <= 0
+shortJustOpened = strategy.position_size < 0 and strategy.position_size[1] >= 0
+
+if longJustOpened
+    stopLevel := strategy.position_avg_price - stopMult * atrR
+    takeLevel := strategy.position_avg_price + takeMult * atrR
+if shortJustOpened
+    stopLevel := strategy.position_avg_price + stopMult * atrR
+    takeLevel := strategy.position_avg_price - takeMult * atrR
+
+if strategy.position_size > 0 and flatLong
+    strategy.close("Long", comment="mid")
+    stopLevel := na
+    takeLevel := na
+if strategy.position_size < 0 and flatShort
+    strategy.close("Short", comment="mid")
+    stopLevel := na
+    takeLevel := na
+
+if strategy.position_size > 0 and not na(stopLevel)
+    strategy.exit("L-exit", from_entry="Long", stop=stopLevel, limit=takeLevel)
+if strategy.position_size < 0 and not na(stopLevel)
+    strategy.exit("S-exit", from_entry="Short", stop=stopLevel, limit=takeLevel)
+
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    stopLevel := na
+    takeLevel := na
+
+plotshape(longCond, title="Long", style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.tiny)
+plotshape(shortCond, title="Short", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.tiny)

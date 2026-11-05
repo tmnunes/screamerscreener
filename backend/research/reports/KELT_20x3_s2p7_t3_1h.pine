@@ -1,0 +1,87 @@
+//@version=5
+// ScreamerScreener A/B: KELT 20x3 / SL2.7 TP3.0 (1H)
+//
+// Same entries as your TV baseline (~+65.95%, PF~1.37, 56/129).
+// ONLY change vs KELT_20x3_s2p5_t4_1h.pine: Take ATR mult 3.5 → 3.0
+// Goal: bank winners a bit earlier → higher WR/PF, PnL should not fall.
+//
+// If PnL < ~66% on TV → go back to TP 3.5 baseline.
+// Chart: ETHUSDT.P (Binance) · 1H · stop/TP FIXED at entry
+
+strategy(
+     title             = "KELT 20x3 / SL2.7 TP3.0 (1H)",
+     shorttitle        = "KELT_2730",
+     overlay           = true,
+     pyramiding        = 0,
+     initial_capital   = 100000,
+     default_qty_type  = strategy.percent_of_equity,
+     default_qty_value = 100,
+     commission_type   = strategy.commission.percent,
+     commission_value  = 0.04,
+     process_orders_on_close = false,
+     calc_on_every_tick = false
+ )
+
+lenKC      = input.int(20, "Keltner EMA length")
+atrKC      = input.int(10, "Keltner ATR length")
+multKC     = input.float(3.0, "Keltner ATR mult", step=0.1)
+atrRisk    = input.int(14, "Risk ATR length")
+stopMult   = input.float(2.7, "Stop ATR mult", step=0.1)
+takeMult   = input.float(3.0, "Take ATR mult", step=0.1)
+useMidExit = input.bool(true, "Exit on mid cross")
+
+mid = ta.ema(close, lenKC)
+atrBand = ta.atr(atrKC)
+upper = mid + multKC * atrBand
+lower = mid - multKC * atrBand
+atrR = ta.atr(atrRisk)
+
+plot(mid, "KC mid", color=color.orange)
+plot(upper, "KC upper", color=color.teal)
+plot(lower, "KC lower", color=color.teal)
+
+longBreak  = close > upper[1]
+shortBreak = close < lower[1]
+longCond  = longBreak and strategy.position_size == 0
+shortCond = shortBreak and strategy.position_size == 0
+flatLong  = useMidExit and close < mid
+flatShort = useMidExit and close > mid
+
+var float stopLevel = na
+var float takeLevel = na
+
+if longCond
+    strategy.entry("Long", strategy.long)
+if shortCond
+    strategy.entry("Short", strategy.short)
+
+longJustOpened  = strategy.position_size > 0 and strategy.position_size[1] <= 0
+shortJustOpened = strategy.position_size < 0 and strategy.position_size[1] >= 0
+
+if longJustOpened
+    stopLevel := strategy.position_avg_price - stopMult * atrR
+    takeLevel := strategy.position_avg_price + takeMult * atrR
+if shortJustOpened
+    stopLevel := strategy.position_avg_price + stopMult * atrR
+    takeLevel := strategy.position_avg_price - takeMult * atrR
+
+if strategy.position_size > 0 and flatLong
+    strategy.close("Long", comment="mid")
+    stopLevel := na
+    takeLevel := na
+if strategy.position_size < 0 and flatShort
+    strategy.close("Short", comment="mid")
+    stopLevel := na
+    takeLevel := na
+
+if strategy.position_size > 0 and not na(stopLevel)
+    strategy.exit("L-exit", from_entry="Long", stop=stopLevel, limit=takeLevel)
+if strategy.position_size < 0 and not na(stopLevel)
+    strategy.exit("S-exit", from_entry="Short", stop=stopLevel, limit=takeLevel)
+
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    stopLevel := na
+    takeLevel := na
+
+plotshape(longCond, title="Long", style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.tiny)
+plotshape(shortCond, title="Short", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.tiny)

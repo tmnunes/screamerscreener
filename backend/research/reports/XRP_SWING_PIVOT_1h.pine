@@ -1,0 +1,86 @@
+//@version=5
+// ScreamerScreener: Swing fade via Pivot High/Low (1H)
+//
+// Matches the style you marked on XRP: SELL at swing tops, BUY at swing bottoms.
+// This is the OPPOSITE of Keltner breakout (KELT fades nothing — it chases breaks).
+//
+// How it works:
+//   - Pivot High confirmed → Short
+//   - Pivot Low confirmed  → Long
+//   - Flips on the opposite pivot; also ATR stop / take
+//   - Confirmation lags by `rightBars` (you cannot know a top until after it forms)
+//
+// Suggested chart: XRPUSDT.P (Binance) · 1H
+// Defaults from research ranking on XRP (engine — validate on TV): left=5 right=8 SL3.5 TP2.0
+// Trust Strategy Tester over any Python headline numbers.
+
+strategy(
+     title             = "XRP Swing Pivot Fade (1H)",
+     shorttitle        = "SWING_PIV_1h",
+     overlay           = true,
+     pyramiding        = 0,
+     initial_capital   = 100000,
+     default_qty_type  = strategy.percent_of_equity,
+     default_qty_value = 100,
+     commission_type   = strategy.commission.percent,
+     commission_value  = 0.04,
+     process_orders_on_close = false,
+     calc_on_every_tick = false
+ )
+
+leftBars  = input.int(5, "Pivot left bars", minval=2, maxval=30)
+rightBars = input.int(8, "Pivot right bars (confirm lag)", minval=2, maxval=30)
+atrLen    = input.int(14, "ATR length")
+stopMult  = input.float(3.5, "Stop ATR mult", step=0.1)
+takeMult  = input.float(2.0, "Take ATR mult", step=0.1)
+
+useRsiFilter = input.bool(false, "Filter with RSI extremes")
+rsiLen       = input.int(14, "RSI length")
+rsiBuyMax    = input.float(40.0, "Long only if RSI ≤", step=1)
+rsiSellMin   = input.float(60.0, "Short only if RSI ≥", step=1)
+
+ph = ta.pivothigh(high, leftBars, rightBars)
+pl = ta.pivotlow(low, leftBars, rightBars)
+rsi = ta.rsi(close, rsiLen)
+atrR = ta.atr(atrLen)
+
+pivotHighConfirmed = not na(ph)
+pivotLowConfirmed  = not na(pl)
+
+rsiLongOk  = not useRsiFilter or rsi <= rsiBuyMax
+rsiShortOk = not useRsiFilter or rsi >= rsiSellMin
+
+// Flip-style: new pivot in opposite direction (or flat → enter)
+longCond  = pivotLowConfirmed and rsiLongOk and strategy.position_size <= 0
+shortCond = pivotHighConfirmed and rsiShortOk and strategy.position_size >= 0
+
+if longCond
+    strategy.entry("Long", strategy.long)
+if shortCond
+    strategy.entry("Short", strategy.short)
+
+var float stopLevel = na
+var float takeLevel = na
+
+longJustOpened  = strategy.position_size > 0 and strategy.position_size[1] <= 0
+shortJustOpened = strategy.position_size < 0 and strategy.position_size[1] >= 0
+
+if longJustOpened
+    stopLevel := strategy.position_avg_price - stopMult * atrR
+    takeLevel := strategy.position_avg_price + takeMult * atrR
+if shortJustOpened
+    stopLevel := strategy.position_avg_price + stopMult * atrR
+    takeLevel := strategy.position_avg_price - takeMult * atrR
+
+if strategy.position_size > 0 and not na(stopLevel)
+    strategy.exit("L-exit", from_entry="Long", stop=stopLevel, limit=takeLevel)
+if strategy.position_size < 0 and not na(stopLevel)
+    strategy.exit("S-exit", from_entry="Short", stop=stopLevel, limit=takeLevel)
+
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    stopLevel := na
+    takeLevel := na
+
+// Visual: mark confirmed pivots (offset back to the actual swing tip)
+plotshape(pivotLowConfirmed, title="Buy pivot", style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.tiny, offset=-rightBars)
+plotshape(pivotHighConfirmed, title="Sell pivot", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.tiny, offset=-rightBars)

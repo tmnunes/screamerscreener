@@ -1,0 +1,98 @@
+//@version=5
+// ScreamerScreener: Keltner 20x2.5 + ADX≥30 / SL6 TP3 (1H)
+//
+// IMPORTANT — trust TradingView over research headlines for this preset.
+// TV (Jan–Nov 2026, your runs): ETH ≈ +19% PF≈1.14 | SOL ≈ +27% PF≈1.19
+// Our Python engine was TOO optimistic (wick TP fills + mid-exit path) and
+// printed ~+130–160% — that does NOT match TV. Use TV as source of truth.
+//
+// Chart: ETHUSDT.P / SOLUSDT.P (Binance) · 1H · stop/TP FIXED at entry.
+// Also check Strategy Properties: 100% equity, commission 0.04%, slippage 0.
+
+strategy(
+     title             = "KELT 20x2.5 ADX30 / SL6 TP3 (1H)",
+     shorttitle        = "KELT_MA_1h",
+     overlay           = true,
+     pyramiding        = 0,
+     initial_capital   = 100000,
+     default_qty_type  = strategy.percent_of_equity,
+     default_qty_value = 100,
+     commission_type   = strategy.commission.percent,
+     commission_value  = 0.04,
+     process_orders_on_close = false,
+     calc_on_every_tick = false
+ )
+
+lenKC      = input.int(20, "Keltner EMA length")
+atrKC      = input.int(10, "Keltner ATR length")
+multKC     = input.float(2.5, "Keltner ATR mult", step=0.1)
+atrRisk    = input.int(14, "Risk ATR length")
+stopMult   = input.float(6.0, "Stop ATR mult", step=0.1)
+takeMult   = input.float(3.0, "Take ATR mult", step=0.1)
+useMidExit = input.bool(true, "Exit on mid cross")
+
+useAdxFilter = input.bool(true, "Require ADX filter")
+adxLen       = input.int(14, "ADX length")
+adxThr       = input.float(30.0, "Min ADX", step=1)
+
+// Preset tip (inputs): for higher WR on SOL, try mult=3 / stop=5 / take=1.5
+// For ETH since Jun'26 max return in search: these defaults (2.5 / 6 / 3)
+
+mid = ta.ema(close, lenKC)
+atrBand = ta.atr(atrKC)
+upper = mid + multKC * atrBand
+lower = mid - multKC * atrBand
+[_diPlus, _diMinus, adxVal] = ta.dmi(adxLen, adxLen)
+atrR = ta.atr(atrRisk)
+
+plot(mid, "KC mid", color=color.orange)
+plot(upper, "KC upper", color=color.teal)
+plot(lower, "KC lower", color=color.teal)
+
+longBreak  = close > upper[1]
+shortBreak = close < lower[1]
+adxOk      = not useAdxFilter or adxVal >= adxThr
+
+longCond  = longBreak and adxOk and strategy.position_size == 0
+shortCond = shortBreak and adxOk and strategy.position_size == 0
+flatLong  = useMidExit and close < mid
+flatShort = useMidExit and close > mid
+
+var float stopLevel = na
+var float takeLevel = na
+
+if longCond
+    strategy.entry("Long", strategy.long)
+if shortCond
+    strategy.entry("Short", strategy.short)
+
+longJustOpened  = strategy.position_size > 0 and strategy.position_size[1] <= 0
+shortJustOpened = strategy.position_size < 0 and strategy.position_size[1] >= 0
+
+if longJustOpened
+    stopLevel := strategy.position_avg_price - stopMult * atrR
+    takeLevel := strategy.position_avg_price + takeMult * atrR
+if shortJustOpened
+    stopLevel := strategy.position_avg_price + stopMult * atrR
+    takeLevel := strategy.position_avg_price - takeMult * atrR
+
+if strategy.position_size > 0 and flatLong
+    strategy.close("Long", comment="mid")
+    stopLevel := na
+    takeLevel := na
+if strategy.position_size < 0 and flatShort
+    strategy.close("Short", comment="mid")
+    stopLevel := na
+    takeLevel := na
+
+if strategy.position_size > 0 and not na(stopLevel)
+    strategy.exit("L-exit", from_entry="Long", stop=stopLevel, limit=takeLevel)
+if strategy.position_size < 0 and not na(stopLevel)
+    strategy.exit("S-exit", from_entry="Short", stop=stopLevel, limit=takeLevel)
+
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    stopLevel := na
+    takeLevel := na
+
+plotshape(longCond, title="Long", style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.tiny)
+plotshape(shortCond, title="Short", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.tiny)

@@ -1,0 +1,147 @@
+//@version=5
+// ScreamerScreener: CMO extremes + KC mid / opposite exit (1H)
+//
+// Based on "CMO + WT CB" (ChuckBanger) — blue line = Chande Momentum.
+//
+// ENTRY (your rule):
+//   Short = CMO crosses ABOVE +60
+//   Long  = CMO crosses BELOW -60
+//
+// EXIT:
+//   1) Keltner MID CROSS (event, not level):
+//        Long  → close crosses UNDER mid  (mid a descer)
+//        Short → close crosses OVER  mid  (mid a subir)
+//   2) Opposite CMO extreme signal
+//   + optional fixed ATR stop/take
+//
+// Chart: ETHUSDT.P · 1H — validate on Strategy Tester.
+
+strategy(
+     title             = "CMO ±60 entry + KC mid exit (1H)",
+     shorttitle        = "CMO_KC_MID",
+     overlay           = true,
+     pyramiding        = 0,
+     initial_capital   = 100000,
+     default_qty_type  = strategy.percent_of_equity,
+     default_qty_value = 100,
+     commission_type   = strategy.commission.percent,
+     commission_value  = 0.04,
+     process_orders_on_close = false,
+     calc_on_every_tick = false
+ )
+
+// ---- CMO (blue line in ChuckBanger script) ----
+lengthCMO = input.int(9, "Chande Momentum Length", minval=1)
+cmoOb     = input.float(60.0, "CMO short level (+)", step=1)
+cmoOs     = input.float(-60.0, "CMO long level (-)", step=1)
+
+// ---- WaveTrend (pink line — plotted only for context, not used in entries) ----
+wtChLen  = input.int(8, "WT Channel Length")
+wtAvgLen = input.int(12, "WT Average Length")
+showWt   = input.bool(false, "Show WT (wt1-wt2) as plotshape hints")
+
+// ---- Keltner mid exit ----
+lenKC      = input.int(20, "Keltner EMA length")
+atrKC      = input.int(12, "Keltner ATR length")
+multKC     = input.float(3.1, "Keltner ATR mult", step=0.1)
+useMidExit = input.bool(true, "Exit on KC mid cross")
+exitOpp    = input.bool(true, "Exit on opposite CMO signal")
+
+// ---- Risk ----
+atrRisk    = input.int(14, "Risk ATR length")
+useStops   = input.bool(true, "Use ATR stop/take")
+stopMult   = input.float(2.7, "Stop ATR mult", step=0.1)
+takeMult   = input.float(3.5, "Take ATR mult", step=0.1)
+
+// CMO (v5 port of ChuckBanger calcCMO)
+calcCMO(src, len) =>
+    momm = ta.change(src)
+    m1 = momm >= 0 ? momm : 0.0
+    m2 = momm >= 0 ? 0.0 : -momm
+    sm1 = math.sum(m1, len)
+    sm2 = math.sum(m2, len)
+    denom = sm1 + sm2
+    denom == 0 ? 0.0 : 100.0 * (sm1 - sm2) / denom
+
+chandeMO = calcCMO(close, lengthCMO)
+
+// WT (ChuckBanger myWT = tci - sma(tci,4)) — optional visual only
+myWT(src, n1, n2) =>
+    emaSrc = ta.ema(src, n1)
+    d = ta.ema(math.abs(src - emaSrc), n1)
+    ci = (src - emaSrc) / (0.015 * d)
+    tci = ta.ema(ci, n2)
+    tci - ta.sma(tci, 4)
+
+wtDiff = myWT(close, wtChLen, wtAvgLen)
+
+// Entries: blue crosses the extreme levels
+longSignal  = ta.crossunder(chandeMO, cmoOs)   // crosses below -60
+shortSignal = ta.crossover(chandeMO, cmoOb)    // crosses above +60
+
+// Keltner
+mid = ta.ema(close, lenKC)
+atrBand = ta.atr(atrKC)
+upper = mid + multKC * atrBand
+lower = mid - multKC * atrBand
+atrR = ta.atr(atrRisk)
+
+plot(mid, "KC mid", color=color.orange, linewidth=2)
+plot(upper, "KC upper", color=color.new(color.teal, 50))
+plot(lower, "KC lower", color=color.new(color.teal, 50))
+
+longCond  = longSignal and strategy.position_size == 0
+shortCond = shortSignal and strategy.position_size == 0
+
+// Mid EXIT must be a CROSS (not close already below/above mid).
+// CMO fades often enter already on the "wrong" side of mid — a level check
+// would flatten on the entry bar. Crosses wait for a real mid pierce:
+//   Long  → mid a descer  (crossunder)
+//   Short → mid a subir   (crossover)
+midDown = ta.crossunder(close, mid)
+midUp   = ta.crossover(close, mid)
+flatLongMid  = useMidExit and midDown
+flatShortMid = useMidExit and midUp
+flatLongOpp  = exitOpp and shortSignal
+flatShortOpp = exitOpp and longSignal
+
+var float stopLevel = na
+var float takeLevel = na
+
+if longCond
+    strategy.entry("Long", strategy.long)
+if shortCond
+    strategy.entry("Short", strategy.short)
+
+longJustOpened  = strategy.position_size > 0 and strategy.position_size[1] <= 0
+shortJustOpened = strategy.position_size < 0 and strategy.position_size[1] >= 0
+
+if longJustOpened
+    stopLevel := strategy.position_avg_price - stopMult * atrR
+    takeLevel := strategy.position_avg_price + takeMult * atrR
+if shortJustOpened
+    stopLevel := strategy.position_avg_price + stopMult * atrR
+    takeLevel := strategy.position_avg_price - takeMult * atrR
+
+if strategy.position_size > 0 and (flatLongMid or flatLongOpp)
+    strategy.close("Long", comment=flatLongOpp ? "opp" : "mid↓")
+    stopLevel := na
+    takeLevel := na
+if strategy.position_size < 0 and (flatShortMid or flatShortOpp)
+    strategy.close("Short", comment=flatShortOpp ? "opp" : "mid↑")
+    stopLevel := na
+    takeLevel := na
+
+if useStops and strategy.position_size > 0 and not na(stopLevel)
+    strategy.exit("L-exit", from_entry="Long", stop=stopLevel, limit=takeLevel)
+if useStops and strategy.position_size < 0 and not na(stopLevel)
+    strategy.exit("S-exit", from_entry="Short", stop=stopLevel, limit=takeLevel)
+
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    stopLevel := na
+    takeLevel := na
+
+plotshape(longCond, title="CMO Long", style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.small)
+plotshape(shortCond, title="CMO Short", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small)
+plotshape(showWt and wtDiff > 0 and wtDiff[1] <= 0, title="WT+", style=shape.circle, location=location.belowbar, color=color.new(#fd00bd, 60), size=size.tiny)
+plotshape(showWt and wtDiff < 0 and wtDiff[1] >= 0, title="WT-", style=shape.circle, location=location.abovebar, color=color.new(#fd00bd, 60), size=size.tiny)

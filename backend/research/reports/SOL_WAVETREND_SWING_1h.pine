@@ -1,0 +1,96 @@
+//@version=5
+// ScreamerScreener: WaveTrend swing fade (LazyBear-style) — SOL 1H
+//
+// Tested vs major SOL swings (proxy for your circles):
+//   WaveTrend best swing-match (F1≈0.48) among RSI / Stoch / StochRSI / EMA / BB / SuperTrend
+//   Pure fade still struggles on SOL 1H PnL in sample — use TV to judge circle fit first.
+//
+// BUY  = WT1 crosses above WT2 while WT1 < oversold
+// SELL = WT1 crosses below WT2 while WT1 > overbought
+//
+// Chart: SOLUSDT.P · 1H
+// If too many signals: raise |ob/os| (e.g. 60/-60) or Channel Length.
+// If missing circles: lower to 45/-45 or Avg Length 10.
+
+strategy(
+     title             = "SOL WaveTrend Swing Fade (1H)",
+     shorttitle        = "SOL_WT_1h",
+     overlay           = true,
+     pyramiding        = 0,
+     initial_capital   = 100000,
+     default_qty_type  = strategy.percent_of_equity,
+     default_qty_value = 100,
+     commission_type   = strategy.commission.percent,
+     commission_value  = 0.04,
+     process_orders_on_close = false,
+     calc_on_every_tick = false
+ )
+
+chLen   = input.int(10, "Channel Length")
+avgLen  = input.int(21, "Average Length")
+obLevel = input.float(53.0, "Overbought", step=1)
+osLevel = input.float(-53.0, "Oversold", step=1)
+atrLen  = input.int(14, "ATR length")
+stopMult = input.float(3.5, "Stop ATR mult", step=0.1)
+takeMult = input.float(2.0, "Take ATR mult", step=0.1)
+useStops = input.bool(true, "Use ATR stop/take")
+exitOnZero = input.bool(true, "Exit when WT crosses 0")
+
+ap = hlc3
+esa = ta.ema(ap, chLen)
+d = ta.ema(math.abs(ap - esa), chLen)
+ci = (ap - esa) / (0.015 * d)
+wt1 = ta.ema(ci, avgLen)
+wt2 = ta.sma(wt1, 4)
+
+crossUp = ta.crossover(wt1, wt2)
+crossDn = ta.crossunder(wt1, wt2)
+
+buySignal  = crossUp and wt1 < osLevel
+sellSignal = crossDn and wt1 > obLevel
+
+atrR = ta.atr(atrLen)
+
+longCond  = buySignal and strategy.position_size <= 0
+shortCond = sellSignal and strategy.position_size >= 0
+
+if longCond
+    strategy.entry("Long", strategy.long)
+if shortCond
+    strategy.entry("Short", strategy.short)
+
+if exitOnZero and strategy.position_size > 0 and wt1 >= 0
+    strategy.close("Long", comment="wt0")
+if exitOnZero and strategy.position_size < 0 and wt1 <= 0
+    strategy.close("Short", comment="wt0")
+
+var float stopLevel = na
+var float takeLevel = na
+
+longJustOpened  = strategy.position_size > 0 and strategy.position_size[1] <= 0
+shortJustOpened = strategy.position_size < 0 and strategy.position_size[1] >= 0
+
+if longJustOpened
+    stopLevel := strategy.position_avg_price - stopMult * atrR
+    takeLevel := strategy.position_avg_price + takeMult * atrR
+if shortJustOpened
+    stopLevel := strategy.position_avg_price + stopMult * atrR
+    takeLevel := strategy.position_avg_price - takeMult * atrR
+
+if useStops and strategy.position_size > 0 and not na(stopLevel)
+    strategy.exit("L-exit", from_entry="Long", stop=stopLevel, limit=takeLevel)
+if useStops and strategy.position_size < 0 and not na(stopLevel)
+    strategy.exit("S-exit", from_entry="Short", stop=stopLevel, limit=takeLevel)
+
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    stopLevel := na
+    takeLevel := na
+
+plotshape(buySignal, title="BUY", style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.small)
+plotshape(sellSignal, title="SELL", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small)
+
+// Optional oscillator pane helper (same script, not overlay — comment in if you want separate)
+// Uncomment below and set overlay=false in strategy() to see WT in a pane instead.
+// plot(wt1, "WT1", color=color.green)
+// plot(wt2, "WT2", color=color.red)
+// hline(obLevel); hline(osLevel); hline(0)
